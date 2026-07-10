@@ -18,9 +18,11 @@ uv run pytest -q
 
 - `src/cascade_env/` — control plane, Gym env, tools, verifiers
 - `scenarios/shopstack/` — application under test
-- `packs/community/` — public tasks T1–T5
+- `packs/community/` — public tasks T1–T8 (incl. L3 multi-fault)
+- `packs/holdout/` — sealed holdout (gitignored; `scripts/scaffold_holdout_pack.py`)
 - `docs/design-cascade.md` — full design
 - `docs/STATUS.md` — **build status + session handoff** (read this first in new sessions)
+- `docs/commercial.md` / `docs/baselines.md` — holdout SKU + pass-rate notes
 
 ## Rules
 

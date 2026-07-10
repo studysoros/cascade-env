@@ -30,14 +30,14 @@ We did **not** implement every PR in the design as separate mergeable PRs. We sh
 | PR4d | Slice 0 smoke script | **Not done** | Gym path covers inject→verify; no dedicated `scripts/smoke_episode.py` |
 | PR5 | Tool adapters | **Done** | files/http/logs/services/db/shell/tests/submit (local runtime) |
 | PR6 | Verifiers + C1–C7 | **Partial** | Multi-verifier + sparse reward work; cheat checks are lighter than full C1–C7 suite; no `test_cheat_catalog.py` |
-| PR7 | Mutators + T1–T3 | **Done** | Plus T4–T5 already authored |
+| PR7 | Mutators + T1–T3 | **Done** | Plus T4–T8 (L3 multi-fault) |
 | PR8 | Gymnasium Cascade-v0 + trajectories | **Done** | Verified with scripted agent |
 | PR9 | Example agents | **Done** | scripted + LLM stub + random rollout |
 | PR10 | CI Linux + security docs | **Not done** | No GitHub Actions; no `docs/security.md` |
 | PR11 | HTTP rollout server | **Not done** | Post-MVP / suggested next #4 |
 | PR12 | Concurrency guards & metrics | **Not done** | |
 | PR13 | T4–T5 + sampling | **Mostly done** | Tasks exist; sampling is basic `sample_task_id` |
-| PR14 | Licensing / commercial docs | **Not done** | Sketch only in design |
+| PR14 | Licensing / commercial docs | **Done** | [`commercial.md`](./commercial.md) + holdout load path |
 | PR15 | Expanded red-team suite | **Not done** | |
 
 ### What *is* solid today
@@ -45,10 +45,12 @@ We did **not** implement every PR in the design as separate mergeable PRs. We sh
 - Real Gymnasium env: `Cascade-v0`
 - Live Shopstack (API + worker + SQLite/file-queue) under **`runtime=local`**
 - Multi-verifier terminal reward
-- Community tasks T1–T5
-- Scripted baseline solves several tasks (R≈0.994)
+- Community tasks **T1–T8** (3× L3 multi-fault with red herrings + `metadata.hidden_checks`)
+- Sealed **holdout pack** scaffold (`scripts/scaffold_holdout_pack.py`, gitignored `packs/holdout/`)
+- Holdout load via `CASCADE_HOLDOUT_DIR` / `CASCADE_EXTRA_PACKS` / absolute `--pack` path
+- Scripted baseline solves several L1–L2 tasks (R≈0.994); L3 scripted pass ~0 (headroom)
 - `uv run cascade doctor | list-tasks | run-episode`
-- Tests: `uv run pytest` (7 passed last run)
+- Docs: [`commercial.md`](./commercial.md), [`baselines.md`](./baselines.md)
 
 ### Default runtime
 
@@ -59,23 +61,17 @@ We did **not** implement every PR in the design as separate mergeable PRs. We sh
 
 ---
 
-## Suggested next moves (session work packages)
+## Work packages
 
-Do these in **separate sessions** (or one session if you have time). Each package is self-contained.
+### WP1 — Harder L3 tasks + private holdout pack — **Done** (2026-07-10)
 
-### WP1 — Harder L3 tasks + private holdout pack
+**Done when (met):**
+- ≥3 L3 public tasks (T6–T8)
+- Holdout pack loads via path/env (`CASCADE_HOLDOUT_DIR`, `CASCADE_EXTRA_PACKS`)
+- README documents holdout SKU
+- `docs/commercial.md` + `docs/baselines.md`
 
-**Goal:** Sellable eval headroom + commercial wedge (sealed holdouts).
-
-**Do:**
-- Add L3 community tasks (cascading faults, red herrings)
-- Create `packs/holdout/` **not committed** (or private repo): sealed task YAMLs
-- Document distribution: public vs sealed in `docs/commercial.md`
-- Baseline scripted agent pass-rate table in `docs/baselines.md`
-
-**Done when:** ≥3 L3 public tasks; holdout pack loads via path/env; README documents holdout SKU.
-
-### WP2 — Harden `runtime=compose`
+### WP2 — Harden `runtime=compose`  ← **next priority**
 
 **Goal:** Docker fidelity path works end-to-end on Desktop + Linux.
 
@@ -142,7 +138,10 @@ Implement work package WP2 (compose runtime).
 uv sync --extra dev
 uv run cascade doctor
 uv run cascade list-tasks
+uv run cascade list-tasks --pack holdout   # after scaffold / CASCADE_HOLDOUT_DIR
 uv run cascade run-episode --task community.T2.pagination_off_by_one.v1 --agent scripted
+uv run cascade run-episode --task community.T6.checkout_cascade.v1 --agent scripted
+uv run python scripts/scaffold_holdout_pack.py
 uv run pytest -q
 uv run python examples/scripted_solve.py
 ```

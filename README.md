@@ -86,13 +86,18 @@ env.close()
 
 ## Task families (community pack)
 
-| ID | Family | Example task |
-|----|--------|----------------|
-| T1 | Incident repair | Worker retry storm |
-| T2 | Runtime bugfix | Pagination off-by-one |
-| T3 | Config remediation | Worker disabled |
-| T4 | Data/schema repair | Bad product prices |
-| T5 | Feature ship | Add `discount_cents` |
+| ID | Family | Tier | Example task |
+|----|--------|------|----------------|
+| T1 | Incident repair | L2 | Worker retry storm |
+| T2 | Runtime bugfix | L1 | Pagination off-by-one |
+| T3 | Config remediation | L1 | Worker disabled |
+| T4 | Data/schema repair | L2 | Bad product prices |
+| T5 | Feature ship | L2 | Add `discount_cents` |
+| T6 | Multi-fault cascade | L3 | Checkout stock + idempotency (+ red herring) |
+| T7 | Multi-fault cascade | L3 | Auth bypass + worker disabled |
+| T8 | Multi-fault cascade | L3 | Catalog pagination + price poison |
+
+L3 tasks intentionally leave **scripted-agent headroom** (compound faults + red herrings). See [`docs/baselines.md`](docs/baselines.md).
 
 ## Architecture
 
@@ -112,24 +117,48 @@ Trainer / Agent
 ```
 src/cascade_env/     # runtime, env, tools, verifiers
 scenarios/shopstack/ # application under test + compose
-packs/community/     # public task pack
+packs/community/     # public task pack (L1–L3)
+packs/holdout/       # sealed holdout (gitignored; scaffold locally)
 examples/            # agent harnesses
 docs/                # design + guides
+scripts/             # scaffold_holdout_pack.py, etc.
 ```
 
-## Commercial packaging
+## Commercial packaging & sealed holdouts
 
 | Tier | Contents |
 |------|----------|
-| Community (free) | Runtime + Shopstack + public tasks |
-| Lab / Enterprise | Sealed private holdouts, hosted scoring, custom CAUT porting |
+| **Community (free)** | Runtime + Shopstack + public `packs/community` tasks |
+| **Lab / Enterprise (holdout SKU)** | Sealed private holdout packs, hosted scoring, custom CAUT porting |
 
 Local “license keys” are not a security boundary; **distribution control** of sealed packs is.
 
-## Design
+### Holdout SKU (how to load)
 
-Full product & systems design: [`docs/design-cascade.md`](docs/design-cascade.md)
+Sealed packs are **not** in the public repo. Scaffold a local private pack or install one from enterprise delivery:
 
+```bash
+# Create a local sealed pack (gitignored)
+uv run python scripts/scaffold_holdout_pack.py
+
+# Point the runtime at it
+export CASCADE_HOLDOUT_DIR=$PWD/packs/holdout   # bash
+# $env:CASCADE_HOLDOUT_DIR = (Resolve-Path packs/holdout).Path  # PowerShell
+
+uv run cascade doctor
+uv run cascade list-tasks --pack holdout
+uv run cascade run-episode --pack holdout --task holdout.H1.stock_retry_compound.v1 --agent scripted
+```
+
+Also supported: `CASCADE_EXTRA_PACKS` (pathsep/comma-separated pack dirs) or `--pack /absolute/path/to/pack`.
+
+Full distribution notes: [`docs/commercial.md`](docs/commercial.md) · baselines: [`docs/baselines.md`](docs/baselines.md)
+## Design & status
+
+- Full product & systems design: [`docs/design-cascade.md`](docs/design-cascade.md)
+- Build status / session handoff: [`docs/STATUS.md`](docs/STATUS.md)
+- Commercial / holdout: [`docs/commercial.md`](docs/commercial.md)
+- Baselines: [`docs/baselines.md`](docs/baselines.md)
 ## License
 
 Apache-2.0

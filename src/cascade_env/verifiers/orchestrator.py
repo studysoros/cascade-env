@@ -242,6 +242,13 @@ def _invariants_family(
 ) -> VerifierResult:
     family = task.family
     try:
+        # Explicit L3/holdout hidden checks (stronger than family defaults)
+        hidden = list(task.metadata.get("hidden_checks") or [])
+        for check in hidden:
+            fail = _run_hidden_check(runtime, handle, task, api_key, check)
+            if fail is not None:
+                return fail
+
         if family == "incident_repair":
             # max_retries should be sane after fix
             cfg = (handle.workspace / "configs" / "worker.yaml").read_text(encoding="utf-8")
@@ -334,11 +341,148 @@ def _invariants_family(
                     )
             return VerifierResult(id="invariants.family", passed=True, detail="feature family ok")
 
+        if family == "multi_fault":
+            if hidden:
+                return VerifierResult(
+                    id="invariants.family",
+                    passed=True,
+                    detail=f"multi_fault hidden checks ok ({len(hidden)})",
+                )
+            return VerifierResult(
+                id="invariants.family",
+                passed=False,
+                detail="multi_fault tasks require metadata.hidden_checks",
+            )
+
         return VerifierResult(
             id="invariants.family", passed=True, detail=f"no specific check for {family}"
         )
     except Exception as exc:  # noqa: BLE001
         return VerifierResult(id="invariants.family", passed=False, detail=str(exc))
+
+
+def _run_hidden_check(
+    runtime: RuntimeBackend,
+    handle: EpisodeHandle,
+    task: TaskSpec,
+    api_key: str,
+    check: str,
+) -> VerifierResult | None:
+    """Return a failing VerifierResult, or None if the check passed."""
+    ws = handle.workspace
+    if check == "stock_decrement":
+        orders = (ws / "app" / "api" / "routes" / "orders.py").read_text(encoding="utf-8")
+        if "CASCADE_FAULT: stock not decremented" in orders or re.search(
+            r"pass\s+#\s*CASCADE_FAULT: stock", orders
+        ):
+            return VerifierResult(
+                id="invariants.family", passed=False, detail="stock still not decremented"
+            )
+        if "product.stock -= " not in orders and "product.stock-=" not in orders:
+            return VerifierResult(
+                id="invariants.family",
+                passed=False,
+                detail="stock decrement logic missing",
+            )
+        return None
+
+    if check == "idempotency":
+        orders = (ws / "app" / "api" / "routes" / "orders.py").read_text(encoding="utf-8")
+        if "CASCADE_FAULT: idempotency broken" in orders or "if False and existing" in orders:
+            return VerifierResult(
+                id="invariants.family", passed=False, detail="idempotency still broken in code"
+            )
+        return None
+
+    if check == "auth_enforced":
+        auth = (ws / "app" / "api" / "auth.py").read_text(encoding="utf-8")
+        if "DEBUG_BYPASS_AUTH = True" in auth:
+            return VerifierResult(
+                id="invariants.family", passed=False, detail="auth bypass still hard-coded"
+            )
+        with httpx.Client(timeout=5) as client:
+            r = client.post(
+                f"{handle.api_base}/v1/orders",
+                json={"items": [{"product_id": 1, "qty": 1}]},
+                headers={"Idempotency-Key": f"hid-auth-{time.time_ns()}"},
+            )
+            if r.status_code != 401:
+                return VerifierResult(
+                    id="invariants.family",
+                    passed=False,
+                    detail=f"unauth create returned {r.status_code}",
+                )
+        return None
+
+    if check == "worker_enabled":
+        cfg = (ws / "configs" / "worker.yaml").read_text(encoding="utf-8")
+        if re.search(r"enabled:\s*(false|False|0)", cfg):
+            return VerifierResult(
+                id="invariants.family", passed=False, detail="worker still disabled"
+            )
+        return None
+
+    if check == "pagination":
+        products = (ws / "app" / "api" / "routes" / "products.py").read_text(encoding="utf-8")
+        if "CASCADE_FAULT: off-by-one" in products or (
+            "offset = page * page_size" in products and "CASCADE_FAULT" in products
+        ):
+            return VerifierResult(
+                id="invariants.family", passed=False, detail="pagination fault still present"
+            )
+        with httpx.Client(timeout=5) as client:
+            r = client.get(f"{handle.api_base}/v1/products", params={"page": 1})
+            if r.status_code != 200 or not r.json().get("items"):
+                return VerifierResult(
+                    id="invariants.family", passed=False, detail="page 1 products empty"
+                )
+        return None
+
+    if check == "prices_valid":
+        products = (ws / "app" / "api" / "routes" / "products.py").read_text(encoding="utf-8")
+        if 'price_cents": None' in products or "null price leak" in products:
+            return VerifierResult(
+                id="invariants.family", passed=False, detail="null price leak still present"
+            )
+        tr = runtime.run_sql(
+            handle,
+            "SELECT COUNT(*) AS c FROM products WHERE price_cents IS NULL OR price_cents < 0",
+            writes=False,
+        )
+        rows = (tr.data or {}).get("rows") or []
+        if not tr.ok or (rows and int(rows[0].get("c", 1)) != 0):
+            return VerifierResult(
+                id="invariants.family", passed=False, detail="bad product prices remain in DB"
+            )
+        return None
+
+    if check == "no_fault_markers":
+        for path in ws.joinpath("app").rglob("*.py"):
+            text = path.read_text(encoding="utf-8")
+            if "CASCADE_FAULT" in text:
+                return VerifierResult(
+                    id="invariants.family",
+                    passed=False,
+                    detail=f"fault marker remains in {path.relative_to(ws)}",
+                )
+        return None
+
+    if check == "worker_retries_sane":
+        cfg = (ws / "configs" / "worker.yaml").read_text(encoding="utf-8")
+        m = re.search(r"max_retries:\s*(\d+)", cfg)
+        if m and int(m.group(1)) > 50:
+            return VerifierResult(
+                id="invariants.family",
+                passed=False,
+                detail=f"max_retries still pathological: {m.group(1)}",
+            )
+        return None
+
+    return VerifierResult(
+        id="invariants.family",
+        passed=False,
+        detail=f"unknown hidden_check: {check}",
+    )
 
 
 def _security_auth(handle: EpisodeHandle, api_key: str) -> VerifierResult:

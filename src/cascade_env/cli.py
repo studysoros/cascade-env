@@ -62,6 +62,10 @@ def cmd_doctor() -> int:
     print(f"work_root   {cfg.resolved_work_root()}")
     print(f"scenarios   {cfg.scenarios_dir()} exists={cfg.scenarios_dir().is_dir()}")
     print(f"packs       {cfg.packs_dir()} exists={cfg.packs_dir().is_dir()}")
+    compose = cfg.scenarios_dir() / "shopstack" / "docker-compose.yml"
+    print(f"compose     {compose} exists={compose.is_file()}")
+    pins = cfg.scenarios_dir() / "shopstack" / "image-pins.env"
+    print(f"image_pins  {pins} exists={pins.is_file()}")
     extra = cfg.extra_pack_dirs()
     if extra:
         for p in extra:
@@ -69,27 +73,61 @@ def cmd_doctor() -> int:
     else:
         print("extra_pack  (none — set CASCADE_EXTRA_PACKS or CASCADE_HOLDOUT_DIR for sealed packs)")
 
-    docker_ok = shutil.which("docker") is not None
-    print(f"docker_bin  {docker_ok}")
-    if docker_ok:
+    docker_bin = shutil.which(cfg.docker_bin) or shutil.which("docker")
+    print(f"docker_bin  {bool(docker_bin)} path={docker_bin or ''}")
+    daemon_ok = False
+    if docker_bin:
         import subprocess
 
         try:
             r = subprocess.run(
-                ["docker", "info"],
+                [docker_bin, "info"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            daemon_ok = r.returncode == 0
+            print(f"docker_daemon {'ok' if daemon_ok else 'not running'}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"docker_daemon error: {exc}")
+        try:
+            r = subprocess.run(
+                [docker_bin, "compose", "version"],
                 capture_output=True,
                 text=True,
                 timeout=10,
             )
-            print(f"docker_daemon {'ok' if r.returncode == 0 else 'not running'}")
+            ver = (r.stdout or r.stderr or "").strip().splitlines()[:1]
+            print(f"compose     {'ok' if r.returncode == 0 else 'missing'} {ver[0] if ver else ''}")
         except Exception as exc:  # noqa: BLE001
-            print(f"docker_daemon error: {exc}")
+            print(f"compose     error: {exc}")
+
+    if daemon_ok:
+        from cascade_env.runtime.compose import ComposeRuntimeBackend
+
+        backend = ComposeRuntimeBackend()
+        img = backend.image_pins_status()
+        for image, present in (img.get("present") or {}).items():
+            print(f"image       {image} present={present}")
+        projects = backend.list_cascade_projects()
+        print(f"compose_projects {len(projects)} {projects[:5]}")
+        missing_base = [
+            image
+            for key, image in (img.get("pins") or {}).items()
+            if key in ("CASCADE_POSTGRES_IMAGE", "CASCADE_REDIS_IMAGE")
+            and not (img.get("present") or {}).get(image)
+        ]
+        if missing_base:
+            print(
+                "hint        base images missing — run: "
+                "uv run python scripts/pull_images.py"
+            )
 
     # orphan workspaces
     root = cfg.resolved_work_root()
     orphans = list(root.glob("ep_*")) if root.is_dir() else []
     print(f"orphan_eps  {len(orphans)}")
-    print("runtime_default local (set CASCADE_RUNTIME=compose for Docker)")
+    print(f"runtime_default {cfg.runtime} (CASCADE_RUNTIME=local|compose)")
     print("SANDBOX ONLY — never attach tools to real production credentials.")
     return 0
 
@@ -97,22 +135,41 @@ def cmd_doctor() -> int:
 def cmd_gc(ttl_hours: float, dry_run: bool) -> int:
     cfg = get_config()
     root = cfg.resolved_work_root()
-    if not root.is_dir():
-        print("nothing to gc")
-        return 0
     cutoff = time.time() - ttl_hours * 3600
     removed = 0
-    for p in root.glob("ep_*"):
+    if root.is_dir():
+        for p in root.glob("ep_*"):
+            try:
+                mtime = p.stat().st_mtime
+            except OSError:
+                continue
+            if mtime < cutoff:
+                print(f"{'would remove' if dry_run else 'removing'} {p}")
+                if not dry_run:
+                    shutil.rmtree(p, ignore_errors=True)
+                removed += 1
+    else:
+        print("no episode work_root yet")
+
+    # Docker compose project reaper (labeled resources)
+    docker_projects = 0
+    if shutil.which(cfg.docker_bin) or shutil.which("docker"):
         try:
-            mtime = p.stat().st_mtime
-        except OSError:
-            continue
-        if mtime < cutoff:
-            print(f"{'would remove' if dry_run else 'removing'} {p}")
-            if not dry_run:
-                shutil.rmtree(p, ignore_errors=True)
-            removed += 1
-    print(f"gc complete: {removed} episode dirs")
+            from cascade_env.runtime.compose import ComposeRuntimeBackend
+
+            backend = ComposeRuntimeBackend()
+            if backend.daemon_ok():
+                gone = backend.gc_projects(
+                    older_than_s=ttl_hours * 3600,
+                    dry_run=dry_run,
+                )
+                for name in gone:
+                    print(f"{'would remove compose' if dry_run else 'removing compose'} {name}")
+                docker_projects = len(gone)
+        except Exception as exc:  # noqa: BLE001
+            print(f"compose gc skipped: {exc}")
+
+    print(f"gc complete: {removed} episode dirs, {docker_projects} compose projects")
     return 0
 
 

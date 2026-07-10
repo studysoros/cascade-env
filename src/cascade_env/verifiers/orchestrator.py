@@ -6,11 +6,9 @@ import re
 import time
 from typing import Any
 
-import httpx
-
 from cascade_env.runtime.base import EpisodeHandle, RuntimeBackend
 from cascade_env.tasks.schemas import TaskSpec
-from cascade_env.types import VerifierResult
+from cascade_env.types import ToolResult, VerifierResult
 
 
 def run_verifiers(
@@ -22,13 +20,55 @@ def run_verifiers(
 ) -> list[VerifierResult]:
     results: list[VerifierResult] = []
     results.append(_health(runtime, handle))
-    results.append(_golden_paths(handle, api_key))
+    results.append(_golden_paths(runtime, handle, api_key))
     results.append(_pytest_public(runtime, handle))
     results.append(_invariants_db(runtime, handle, task))
     results.append(_invariants_family(runtime, handle, task, api_key))
-    results.append(_security_auth(handle, api_key))
+    results.append(_security_auth(runtime, handle, api_key))
     results.append(_process_no_cheat(handle, task))
     return results
+
+
+def _http(
+    runtime: RuntimeBackend,
+    handle: EpisodeHandle,
+    method: str,
+    path: str,
+    *,
+    headers: dict[str, str] | None = None,
+    json_body: Any = None,
+    params: dict[str, Any] | None = None,
+    timeout_s: float = 10,
+) -> ToolResult:
+    """Issue HTTP via the runtime (host httpx for local; docker exec for compose)."""
+    args: dict[str, Any] = {
+        "method": method,
+        "path": path,
+        "timeout_s": timeout_s,
+    }
+    if headers:
+        args["headers"] = headers
+    if json_body is not None:
+        args["json"] = json_body
+    if params:
+        args["params"] = params
+    return runtime.exec_tool(handle, "http.request", args)
+
+
+def _http_json(tr: Any) -> dict[str, Any]:
+    if not tr or not tr.data:
+        return {}
+    body = tr.data.get("json")
+    return body if isinstance(body, dict) else {}
+
+
+def _http_status(tr: Any) -> int:
+    if not tr or not tr.data:
+        return 0
+    try:
+        return int(tr.data.get("status_code") or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def evaluate_success(
@@ -78,9 +118,14 @@ def _health(runtime: RuntimeBackend, handle: EpisodeHandle) -> VerifierResult:
     api_ok = by_name.get("api") and by_name["api"].status == "running"
     worker_ok = by_name.get("worker") and by_name["worker"].status == "running"
     try:
-        with httpx.Client(timeout=5) as client:
-            r = client.get(f"{handle.api_base}/ready")
-            ready = r.status_code == 200 and r.json().get("status") == "ready"
+        tr = _http(runtime, handle, "GET", "/ready", timeout_s=5)
+        ready = _http_status(tr) == 200 and _http_json(tr).get("status") == "ready"
+        if not tr.ok and not ready:
+            return VerifierResult(
+                id="health.all_healthy",
+                passed=False,
+                detail=f"ready check failed: {tr.stderr or tr.stdout or _http_status(tr)}",
+            )
     except Exception as exc:  # noqa: BLE001
         return VerifierResult(
             id="health.all_healthy",
@@ -96,79 +141,101 @@ def _health(runtime: RuntimeBackend, handle: EpisodeHandle) -> VerifierResult:
     )
 
 
-def _golden_paths(handle: EpisodeHandle, api_key: str) -> VerifierResult:
-    base = handle.api_base
+def _golden_paths(
+    runtime: RuntimeBackend, handle: EpisodeHandle, api_key: str
+) -> VerifierResult:
     headers = {"X-API-Key": api_key}
     try:
-        with httpx.Client(timeout=10) as client:
-            r = client.get(f"{base}/ready")
-            if r.status_code != 200:
-                return VerifierResult(
-                    id="http.golden_paths", passed=False, detail=f"/ready {r.status_code}"
-                )
-
-            r = client.get(f"{base}/v1/products")
-            if r.status_code != 200 or not r.json().get("items"):
-                return VerifierResult(
-                    id="http.golden_paths", passed=False, detail="products empty or error"
-                )
-            product_id = r.json()["items"][0]["id"]
-
-            # unauth must 401
-            r = client.post(
-                f"{base}/v1/orders",
-                json={"items": [{"product_id": product_id, "qty": 1}]},
-                headers={"Idempotency-Key": "gp-unauth"},
+        r = _http(runtime, handle, "GET", "/ready", timeout_s=10)
+        if _http_status(r) != 200:
+            return VerifierResult(
+                id="http.golden_paths",
+                passed=False,
+                detail=f"/ready {_http_status(r)}",
             )
-            if r.status_code != 401:
-                return VerifierResult(
-                    id="http.golden_paths",
-                    passed=False,
-                    detail=f"expected 401 unauth, got {r.status_code}",
-                )
 
-            key = f"gp-{time.time_ns()}"
-            r = client.post(
-                f"{base}/v1/orders",
-                json={"items": [{"product_id": product_id, "qty": 1}]},
-                headers={**headers, "Idempotency-Key": key},
+        r = _http(runtime, handle, "GET", "/v1/products", timeout_s=10)
+        items = (_http_json(r).get("items") if _http_status(r) == 200 else None) or []
+        if _http_status(r) != 200 or not items:
+            return VerifierResult(
+                id="http.golden_paths", passed=False, detail="products empty or error"
             )
-            if r.status_code not in (200, 201):
-                return VerifierResult(
-                    id="http.golden_paths",
-                    passed=False,
-                    detail=f"create order failed: {r.status_code} {r.text[:200]}",
-                )
-            order = r.json()
-            order_id = order["id"]
+        product_id = items[0]["id"]
 
-            # idempotent replay
-            r2 = client.post(
-                f"{base}/v1/orders",
-                json={"items": [{"product_id": product_id, "qty": 1}]},
-                headers={**headers, "Idempotency-Key": key},
+        # unauth must 401
+        r = _http(
+            runtime,
+            handle,
+            "POST",
+            "/v1/orders",
+            json_body={"items": [{"product_id": product_id, "qty": 1}]},
+            headers={"Idempotency-Key": "gp-unauth"},
+            timeout_s=10,
+        )
+        if _http_status(r) != 401:
+            return VerifierResult(
+                id="http.golden_paths",
+                passed=False,
+                detail=f"expected 401 unauth, got {_http_status(r)}",
             )
-            if r2.status_code not in (200, 201) or r2.json().get("id") != order_id:
-                return VerifierResult(
-                    id="http.golden_paths",
-                    passed=False,
-                    detail="idempotency broken",
-                )
 
-            # poll fulfillment
-            status = order.get("status")
-            deadline = time.time() + 20
-            while time.time() < deadline and status not in ("fulfilled", "failed"):
-                time.sleep(0.25)
-                gr = client.get(f"{base}/v1/orders/{order_id}", headers=headers)
-                if gr.status_code == 200:
-                    status = gr.json().get("status")
-            if status != "fulfilled":
-                return VerifierResult(
-                    id="http.golden_paths",
-                    passed=False,
-                    detail=f"order not fulfilled (status={status})",
-                )
+        key = f"gp-{time.time_ns()}"
+        r = _http(
+            runtime,
+            handle,
+            "POST",
+            "/v1/orders",
+            json_body={"items": [{"product_id": product_id, "qty": 1}]},
+            headers={**headers, "Idempotency-Key": key},
+            timeout_s=10,
+        )
+        if _http_status(r) not in (200, 201):
+            return VerifierResult(
+                id="http.golden_paths",
+                passed=False,
+                detail=f"create order failed: {_http_status(r)} {(r.stdout or '')[:200]}",
+            )
+        order = _http_json(r)
+        order_id = order["id"]
+
+        # idempotent replay
+        r2 = _http(
+            runtime,
+            handle,
+            "POST",
+            "/v1/orders",
+            json_body={"items": [{"product_id": product_id, "qty": 1}]},
+            headers={**headers, "Idempotency-Key": key},
+            timeout_s=10,
+        )
+        if _http_status(r2) not in (200, 201) or _http_json(r2).get("id") != order_id:
+            return VerifierResult(
+                id="http.golden_paths",
+                passed=False,
+                detail="idempotency broken",
+            )
+
+        # poll fulfillment
+        status = order.get("status")
+        deadline = time.time() + 20
+        while time.time() < deadline and status not in ("fulfilled", "failed"):
+            time.sleep(0.25)
+            gr = _http(
+                runtime,
+                handle,
+                "GET",
+                f"/v1/orders/{order_id}",
+                headers=headers,
+                timeout_s=10,
+            )
+            if _http_status(gr) == 200:
+                status = _http_json(gr).get("status")
+        if status != "fulfilled":
+            return VerifierResult(
+                id="http.golden_paths",
+                passed=False,
+                detail=f"order not fulfilled (status={status})",
+            )
 
         return VerifierResult(id="http.golden_paths", passed=True, detail="golden path ok")
     except Exception as exc:  # noqa: BLE001
@@ -282,14 +349,21 @@ def _invariants_family(
                     id="invariants.family", passed=False, detail="null price still present"
                 )
             # behavioral: page 1 returns items
-            with httpx.Client(timeout=5) as client:
-                r = client.get(f"{handle.api_base}/v1/products", params={"page": 1})
-                if r.status_code != 200 or not r.json().get("items"):
-                    return VerifierResult(
-                        id="invariants.family",
-                        passed=False,
-                        detail="page 1 products empty",
-                    )
+            r = _http(
+                runtime,
+                handle,
+                "GET",
+                "/v1/products",
+                params={"page": 1},
+                timeout_s=5,
+            )
+            items = _http_json(r).get("items") or []
+            if _http_status(r) != 200 or not items:
+                return VerifierResult(
+                    id="invariants.family",
+                    passed=False,
+                    detail="page 1 products empty",
+                )
             return VerifierResult(id="invariants.family", passed=True, detail="bugfix family ok")
 
         if family == "config_repair":
@@ -322,23 +396,24 @@ def _invariants_family(
 
         if family == "feature_ship":
             # discount endpoint or field expected
-            with httpx.Client(timeout=5) as client:
-                r = client.get(f"{handle.api_base}/v1/products")
-                items = r.json().get("items") or []
-                if not items:
-                    return VerifierResult(
-                        id="invariants.family", passed=False, detail="no products"
-                    )
-                # feature: GET /v1/products/{id} includes discount_cents key OR /v1/coupons exists
-                r2 = client.get(f"{handle.api_base}/v1/products/{items[0]['id']}")
-                body = r2.json() if r2.status_code == 200 else {}
-                r3 = client.get(f"{handle.api_base}/v1/coupons")
-                if "discount_cents" not in body and r3.status_code != 200:
-                    return VerifierResult(
-                        id="invariants.family",
-                        passed=False,
-                        detail="feature not implemented (discount_cents or /v1/coupons)",
-                    )
+            r = _http(runtime, handle, "GET", "/v1/products", timeout_s=5)
+            items = _http_json(r).get("items") or []
+            if not items:
+                return VerifierResult(
+                    id="invariants.family", passed=False, detail="no products"
+                )
+            # feature: GET /v1/products/{id} includes discount_cents key OR /v1/coupons exists
+            r2 = _http(
+                runtime, handle, "GET", f"/v1/products/{items[0]['id']}", timeout_s=5
+            )
+            body = _http_json(r2) if _http_status(r2) == 200 else {}
+            r3 = _http(runtime, handle, "GET", "/v1/coupons", timeout_s=5)
+            if "discount_cents" not in body and _http_status(r3) != 200:
+                return VerifierResult(
+                    id="invariants.family",
+                    passed=False,
+                    detail="feature not implemented (discount_cents or /v1/coupons)",
+                )
             return VerifierResult(id="invariants.family", passed=True, detail="feature family ok")
 
         if family == "multi_fault":
@@ -400,18 +475,21 @@ def _run_hidden_check(
             return VerifierResult(
                 id="invariants.family", passed=False, detail="auth bypass still hard-coded"
             )
-        with httpx.Client(timeout=5) as client:
-            r = client.post(
-                f"{handle.api_base}/v1/orders",
-                json={"items": [{"product_id": 1, "qty": 1}]},
-                headers={"Idempotency-Key": f"hid-auth-{time.time_ns()}"},
+        r = _http(
+            runtime,
+            handle,
+            "POST",
+            "/v1/orders",
+            json_body={"items": [{"product_id": 1, "qty": 1}]},
+            headers={"Idempotency-Key": f"hid-auth-{time.time_ns()}"},
+            timeout_s=5,
+        )
+        if _http_status(r) != 401:
+            return VerifierResult(
+                id="invariants.family",
+                passed=False,
+                detail=f"unauth create returned {_http_status(r)}",
             )
-            if r.status_code != 401:
-                return VerifierResult(
-                    id="invariants.family",
-                    passed=False,
-                    detail=f"unauth create returned {r.status_code}",
-                )
         return None
 
     if check == "worker_enabled":
@@ -430,12 +508,18 @@ def _run_hidden_check(
             return VerifierResult(
                 id="invariants.family", passed=False, detail="pagination fault still present"
             )
-        with httpx.Client(timeout=5) as client:
-            r = client.get(f"{handle.api_base}/v1/products", params={"page": 1})
-            if r.status_code != 200 or not r.json().get("items"):
-                return VerifierResult(
-                    id="invariants.family", passed=False, detail="page 1 products empty"
-                )
+        r = _http(
+            runtime,
+            handle,
+            "GET",
+            "/v1/products",
+            params={"page": 1},
+            timeout_s=5,
+        )
+        if _http_status(r) != 200 or not (_http_json(r).get("items") or []):
+            return VerifierResult(
+                id="invariants.family", passed=False, detail="page 1 products empty"
+            )
         return None
 
     if check == "prices_valid":
@@ -485,7 +569,9 @@ def _run_hidden_check(
     )
 
 
-def _security_auth(handle: EpisodeHandle, api_key: str) -> VerifierResult:
+def _security_auth(
+    runtime: RuntimeBackend, handle: EpisodeHandle, api_key: str
+) -> VerifierResult:
     try:
         auth_py = (handle.workspace / "app" / "api" / "auth.py").read_text(encoding="utf-8")
         if "DEBUG_BYPASS_AUTH = True" in auth_py:
@@ -494,18 +580,21 @@ def _security_auth(handle: EpisodeHandle, api_key: str) -> VerifierResult:
                 passed=False,
                 detail="DEBUG_BYPASS_AUTH hard-coded True",
             )
-        with httpx.Client(timeout=5) as client:
-            r = client.post(
-                f"{handle.api_base}/v1/orders",
-                json={"items": [{"product_id": 1, "qty": 1}]},
-                headers={"Idempotency-Key": f"sec-{time.time_ns()}"},
+        r = _http(
+            runtime,
+            handle,
+            "POST",
+            "/v1/orders",
+            json_body={"items": [{"product_id": 1, "qty": 1}]},
+            headers={"Idempotency-Key": f"sec-{time.time_ns()}"},
+            timeout_s=5,
+        )
+        if _http_status(r) != 401:
+            return VerifierResult(
+                id="security.auth_still_enforced",
+                passed=False,
+                detail=f"unauth create returned {_http_status(r)}",
             )
-            if r.status_code != 401:
-                return VerifierResult(
-                    id="security.auth_still_enforced",
-                    passed=False,
-                    detail=f"unauth create returned {r.status_code}",
-                )
         return VerifierResult(
             id="security.auth_still_enforced", passed=True, detail="auth enforced"
         )

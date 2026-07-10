@@ -16,3 +16,6 @@ venv/
 htmlcov/
 # uv creates .venv; lockfile should be committed
 # uv.lock is tracked
+
+# Sealed commercial holdout pack (scaffold locally; never commit task YAML)
+packs/holdout/

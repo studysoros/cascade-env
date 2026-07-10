@@ -1,4 +1,4 @@
-"""cascade CLI: doctor | gc | list-tasks | run-episode."""
+"""cascade CLI: doctor | gc | list-tasks | run-episode | eval-baselines."""
 
 from __future__ import annotations
 
@@ -37,10 +37,42 @@ def main(argv: list[str] | None = None) -> int:
     p_run.add_argument(
         "--agent",
         default="scripted",
-        choices=["scripted", "random", "manual"],
-        help="scripted=known-fix agent for demos; random=noop; manual=stdin tools",
+        choices=["scripted", "random", "manual", "llm"],
+        help="scripted=known-fix; random=noop; manual=stdin; llm=real model (API key)",
     )
     p_run.add_argument("--max-steps", type=int, default=40)
+    p_run.add_argument("--provider", default=None, help="LLM provider (openai|anthropic|xai)")
+    p_run.add_argument("--model", default=None, help="LLM model id")
+    p_run.add_argument("--base-url", default=None, help="LLM API base URL")
+    p_run.add_argument("--api-key", default=None, help="LLM API key (else env)")
+    p_run.add_argument("--temperature", type=float, default=0.0)
+
+    p_eval = sub.add_parser(
+        "eval-baselines",
+        help="Run N seeds × task set; write JSON pass-rate summary",
+    )
+    p_eval.add_argument("--agent", choices=["scripted", "llm"], default="scripted")
+    p_eval.add_argument("--pack", default="community")
+    p_eval.add_argument("--runtime", default="local", choices=["local", "compose"])
+    p_eval.add_argument("--max-steps", type=int, default=40)
+    p_eval.add_argument(
+        "--tasks",
+        default=None,
+        help="Comma-separated task ids (default: community T1–T5)",
+    )
+    p_eval.add_argument("--seeds", default="0", help="Comma-separated seeds")
+    p_eval.add_argument("--provider", default=None)
+    p_eval.add_argument("--model", default=None)
+    p_eval.add_argument("--base-url", default=None)
+    p_eval.add_argument("--api-key", default=None)
+    p_eval.add_argument("--temperature", type=float, default=0.0)
+    p_eval.add_argument(
+        "--out",
+        default="docs/artifacts/baseline-summary.json",
+        help="JSON summary output path",
+    )
+    p_eval.add_argument("--md-out", default=None, help="Optional markdown table path")
+    p_eval.add_argument("--quiet", action="store_true")
 
     args = parser.parse_args(argv)
     if args.cmd == "doctor":
@@ -51,6 +83,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_list_tasks(args.pack)
     if args.cmd == "run-episode":
         return cmd_run_episode(args)
+    if args.cmd == "eval-baselines":
+        return cmd_eval_baselines(args)
     return 1
 
 
@@ -187,6 +221,9 @@ def cmd_run_episode(args: argparse.Namespace) -> int:
     from cascade_env.env import CascadeEnv
     from cascade_env.agents.scripted import scripted_policy
 
+    if args.agent == "llm":
+        return _cmd_run_episode_llm(args)
+
     env = CascadeEnv(
         pack=args.pack,
         task_id=args.task,
@@ -234,6 +271,106 @@ def cmd_run_episode(args: argparse.Namespace) -> int:
         return 0 if info.get("success") else 2
     finally:
         env.close()
+
+
+def _cmd_run_episode_llm(args: argparse.Namespace) -> int:
+    import gymnasium as gym
+
+    import cascade_env
+    from cascade_env.agents.llm_agent import run_llm_episode
+    from cascade_env.agents.llm_client import LLMClient, LLMError
+
+    cascade_env.register_envs()
+    try:
+        client = LLMClient(
+            provider=args.provider,
+            model=args.model,
+            api_key=args.api_key,
+            base_url=args.base_url,
+            temperature=args.temperature,
+        )
+        client.require_api_key()
+    except LLMError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    env = gym.make(
+        "Cascade-v0",
+        pack=args.pack,
+        runtime=args.runtime,
+        task_id=args.task,
+        max_steps=args.max_steps,
+    )
+    try:
+        print(f"provider={client.provider} model={client.model}")
+        outcome = run_llm_episode(
+            env,
+            client,
+            seed=args.seed,
+            task_id=args.task,
+            verbose=True,
+        )
+        print(json.dumps(outcome.as_dict(), indent=2, ensure_ascii=False))
+        return 0 if outcome.success and not outcome.error else 2
+    finally:
+        env.close()
+        client.close()
+
+
+def cmd_eval_baselines(args: argparse.Namespace) -> int:
+    from cascade_env.agents.eval import (
+        DEFAULT_BASELINE_TASKS,
+        EvalConfig,
+        format_markdown_table,
+        run_eval,
+        write_summary,
+    )
+    from cascade_env.agents.llm_client import LLMError
+
+    def _tasks(raw: str | None) -> list[str]:
+        if not raw or not raw.strip():
+            return list(DEFAULT_BASELINE_TASKS)
+        return [p.strip() for p in raw.replace(";", ",").split(",") if p.strip()]
+
+    def _seeds(raw: str) -> list[int]:
+        return [int(p.strip()) for p in raw.replace(";", ",").split(",") if p.strip()]
+
+    cfg = EvalConfig(
+        tasks=_tasks(args.tasks),
+        seeds=_seeds(args.seeds),
+        pack=args.pack,
+        runtime=args.runtime,
+        max_steps=args.max_steps,
+        agent=args.agent,
+        provider=args.provider,
+        model=args.model,
+        api_key=args.api_key,
+        base_url=args.base_url,
+        temperature=args.temperature,
+        verbose=not args.quiet,
+    )
+    try:
+        summary = run_eval(cfg)
+    except LLMError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    out = write_summary(summary, args.out)
+    md = format_markdown_table(summary)
+    md_path = Path(args.md_out) if args.md_out else out.with_suffix(".md")
+    md_path.parent.mkdir(parents=True, exist_ok=True)
+    md_path.write_text(md + "\n", encoding="utf-8")
+    s = summary.get("summary") or {}
+    meta = summary.get("meta") or {}
+    print(
+        f"wrote {out}  pass@1={s.get('pass_at_1', 0):.3f} "
+        f"n={s.get('n_episodes')} model={meta.get('model')}"
+    )
+    print(f"wrote {md_path}")
+    if not args.quiet:
+        print()
+        print(md)
+    return 0
 
 
 if __name__ == "__main__":

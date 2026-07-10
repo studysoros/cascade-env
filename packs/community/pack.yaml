@@ -13,3 +13,4 @@ pack:
   splits:
     train: { filter: "tier in [L1, L2]" }
     test: { filter: "tier in [L1, L2, L3]" }
+    hard: { filter: "tier == L3" }

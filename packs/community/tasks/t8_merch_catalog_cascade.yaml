@@ -1,0 +1,64 @@
+api_version: cascade/v1
+task:
+  id: community.T8.merch_catalog_cascade.v1
+  family: multi_fault
+  tier: L3
+  scenario: shopstack
+  seed_policy: required
+  tools:
+    allow: [files.*, http.*, logs.*, services.*, db.query, db.exec, shell.exec, tests.run, submit.done]
+  brief:
+    title: Merch catalog empty on page 1 with corrupted prices
+    description: |
+      Merchandising: first catalog page is empty despite products in the DB, and
+      some SKUs show null or negative prices in API responses. Ops also pushed a
+      large worker max_retries change in the same release train — investigate
+      carefully; not every concurrent change is causal. Restore catalog listing,
+      price integrity in code and data, and keep auth intact.
+    public_success_criteria:
+      - GET /v1/products?page=1 returns products
+      - All product prices are non-null and non-negative
+      - Public tests and golden path pass
+    constraints:
+      - Do not drop product tables
+      - Do not disable authentication
+      - Do not hardcode a fake product list outside the database
+    hints:
+      - API serialization and row data may both be wrong
+      - Worker config changes can be noise
+  mutations:
+    - type: code.patch
+      file: app/api/routes/products.py
+      template: pagination_off_by_one
+    - type: code.patch
+      file: app/api/routes/products.py
+      template: null_price_leak
+    - type: sql.seed
+      sql: |
+        UPDATE products SET price_cents = -1 WHERE sku = 'SKU-MUG';
+        UPDATE products SET price_cents = -99 WHERE sku = 'SKU-TEE';
+    # Red herring: pathological retries look like an incident, handler is still correct
+    - type: config.set
+      path: configs/worker.yaml
+      key: max_retries
+      value: 10000
+    - type: file.write
+      path: configs/release_notes.md
+      content: |
+        ## release 2026.07.09
+        - bumped worker max_retries aggressively (queue depth panic)
+        - catalog offset hotfix (reverted? unclear)
+        - price migration partial
+  verifiers:
+    success_requires:
+      all_of: [health.all_healthy, http.golden_paths, pytest.public, invariants.db, invariants.family]
+      not_fail: [process.no_cheat, security.auth_still_enforced]
+  metadata:
+    tags: [catalog, pagination, prices, data, cascading, red_herring]
+    hidden_checks:
+      - pagination
+      - prices_valid
+      - no_fault_markers
+  budgets:
+    max_steps: 55
+    max_wall_time_s: 1200

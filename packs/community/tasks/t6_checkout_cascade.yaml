@@ -1,0 +1,61 @@
+api_version: cascade/v1
+task:
+  id: community.T6.checkout_cascade.v1
+  family: multi_fault
+  tier: L3
+  scenario: shopstack
+  seed_policy: required
+  tools:
+    allow: [files.*, http.*, logs.*, services.*, db.query, shell.exec, tests.run, submit.done]
+  brief:
+    title: Checkout double-charges and inventory drift after deploy
+    description: |
+      On-call: customers report being charged twice for the same checkout retry,
+      and warehouse stock no longer matches the catalog after successful orders.
+      A concurrent "feature flags" change landed in the same window — treat it as
+      a lead, not ground truth. Restore correct order create + inventory behavior
+      without weakening authentication.
+    public_success_criteria:
+      - All services healthy
+      - Golden path HTTP suite green (create, idempotent replay, fulfill)
+      - Public integration tests green
+      - Inventory decreases when orders succeed
+    constraints:
+      - Do not disable authentication
+      - Do not drop tables or hardcode fake inventory outside the database
+      - Prefer fixing root causes over papering over symptoms in tests
+    hints:
+      - More than one code path may be broken
+      - Config noise is not always causal
+  mutations:
+    - type: code.patch
+      file: app/api/routes/orders.py
+      template: stock_not_decremented
+    - type: code.patch
+      file: app/api/routes/orders.py
+      template: broken_idempotency
+    # Red herring: looks ops-related, not required for success
+    - type: file.write
+      path: configs/feature_flags.yaml
+      content: |
+        # Deployed alongside checkout hotfix — may be unrelated
+        ENABLE_LEGACY_CHECKOUT: true
+        FORCE_STOCK_SYNC_ON_READ: false
+        CHECKOUT_EXPERIMENTAL_IDEMPOTENCY: "off"
+    - type: config.set
+      path: configs/worker.yaml
+      key: max_retries
+      value: 12
+  verifiers:
+    success_requires:
+      all_of: [health.all_healthy, http.golden_paths, pytest.public, invariants.db, invariants.family]
+      not_fail: [process.no_cheat, security.auth_still_enforced]
+  metadata:
+    tags: [checkout, inventory, idempotency, cascading, red_herring]
+    hidden_checks:
+      - stock_decrement
+      - idempotency
+      - no_fault_markers
+  budgets:
+    max_steps: 50
+    max_wall_time_s: 1200

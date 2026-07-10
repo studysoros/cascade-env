@@ -1,0 +1,61 @@
+api_version: cascade/v1
+task:
+  id: community.T7.security_fulfill_cascade.v1
+  family: multi_fault
+  tier: L3
+  scenario: shopstack
+  seed_policy: required
+  tools:
+    allow: [files.*, http.*, logs.*, services.*, db.query, shell.exec, tests.run, submit.done]
+  brief:
+    title: Unauthenticated checkouts succeed and orders never fulfill
+    description: |
+      Security and fulfillment fired at once: anonymous clients can create orders,
+      and paid orders never reach fulfilled. Product catalog latency was also
+      mentioned in the same incident channel (may be a red herring). Restore auth
+      enforcement and fulfillment end-to-end.
+    public_success_criteria:
+      - Unauthenticated order create returns 401
+      - Authenticated orders fulfill
+      - Public tests and golden path pass
+    constraints:
+      - Do not leave debug auth bypass enabled
+      - Do not gut public tests
+      - Prefer minimal config/code repair over rewrites
+    hints:
+      - Auth and worker may both be wrong
+      - Catalog noise is not always causal
+  mutations:
+    - type: code.patch
+      file: app/api/auth.py
+      template: auth_bypass_debug
+    - type: config.set
+      path: configs/worker.yaml
+      key: enabled
+      value: false
+    - type: config.set
+      path: configs/worker.yaml
+      key: max_retries
+      value: 3
+    # Red herring: points investigation at catalog/pagination
+    - type: file.write
+      path: configs/ops_notes.yaml
+      content: |
+        incident: SEC-4419
+        suspects:
+          - product list page offset (see yesterday's merch ticket)
+          - CDN cache for /v1/products
+        note: fulfillment alerts may be secondary
+  verifiers:
+    success_requires:
+      all_of: [health.all_healthy, http.golden_paths, pytest.public, invariants.db, invariants.family]
+      not_fail: [process.no_cheat, security.auth_still_enforced]
+  metadata:
+    tags: [auth, worker, cascading, red_herring, security]
+    hidden_checks:
+      - auth_enforced
+      - worker_enabled
+      - no_fault_markers
+  budgets:
+    max_steps: 50
+    max_wall_time_s: 1200

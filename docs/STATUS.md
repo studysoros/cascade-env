@@ -1,6 +1,6 @@
 # Cascade — build status & session handoff
 
-**Last updated:** 2026-07-10 (WP4 implemented)  
+**Last updated:** 2026-07-10 (PR12 concurrency guards & metrics)  
 **Package manager:** `uv` only (`uv sync --extra dev`, `uv run …`) — not pip  
 **Lockfile:** `uv.lock` (committed)  
 **Design source of truth:** [`design-cascade.md`](./design-cascade.md)
@@ -35,7 +35,7 @@ We did **not** implement every PR in the design as separate mergeable PRs. We sh
 | PR9 | Example agents | **Done** | scripted + LLM stub + real `llm_tool_loop` + eval harness |
 | PR10 | CI Linux + security docs | **Not done** | No GitHub Actions; no `docs/security.md` |
 | PR11 | HTTP rollout server | **Done** | `cascade serve` + FastAPI `/v1/episodes`; WP4 |
-| PR12 | Concurrency guards & metrics | **Not done** | |
+| PR12 | Concurrency guards & metrics | **Done** | max_parallel 429; provision/step/verify histograms; `/v1/metrics`; episode TTL reaper; debug profile guard |
 | PR13 | T4–T5 + sampling | **Mostly done** | Tasks exist; sampling is basic `sample_task_id` |
 | PR14 | Licensing / commercial docs | **Done** | [`commercial.md`](./commercial.md) + holdout load path |
 | PR15 | Expanded red-team suite | **Not done** | |
@@ -53,6 +53,7 @@ We did **not** implement every PR in the design as separate mergeable PRs. We sh
 - Measured scripted T1–T5 card: **pass@1=0.80** (`docs/artifacts/baseline-scripted-t1-t5.json`)
 - Real LLM tool loop (`examples/llm_tool_loop.py`) + `cascade eval-baselines` (OpenAI-compatible / Anthropic / xAI)
 - `uv run cascade doctor | list-tasks | run-episode | eval-baselines | gc | serve`
+- HTTP metrics: `GET /v1/metrics` (auth) — counters + provision/step/verify histograms
 - Docs: [`commercial.md`](./commercial.md), [`baselines.md`](./baselines.md), compose notes in [`windows.md`](./windows.md) / [`quickstart.md`](./quickstart.md)
 
 ### Default runtime
@@ -113,7 +114,7 @@ uv run cascade eval-baselines --agent llm --provider xai --model grok-3 --seeds 
 # paste the markdown card into docs/baselines.md Frontier section
 ```
 
-Then mark WP3 fully **Done** and advance to WP4.
+Then mark WP3 fully **Done**.
 
 ### WP4 — HTTP rollout server — **Done** (2026-07-10)
 
@@ -137,14 +138,33 @@ uv run python examples/remote_client.py --api-key dev-key \
   --task community.T2.pagination_off_by_one.v1
 ```
 
+### PR12 — Concurrency guards & provision metrics — **Done** (2026-07-10)
+
+**Goal:** Desktop-safe parallelism + operability signals (design PR12).
+
+**Done:**
+- `max_parallel_episodes` enforced on HTTP create (429 `CAPACITY` + `capacity_rejects` counter)
+- Process-local metrics: `src/cascade_env/metrics.py` (counters + fixed-bucket histograms)
+- Wired in `EpisodeManager`: `provision_ms`, `step_ms`, `verify_ms` + success/fail counters
+- `GET /v1/metrics` (auth) returns snapshot JSON
+- Episode TTL reaper on `SessionStore` (`CASCADE_EPISODE_TTL_S`, default 7200s); step on expired → 410 `EXPIRED`
+- Compose debug profile refuses when `max_parallel_episodes > 1` (host ports are single-episode only)
+- Tests: `tests/test_metrics.py`, extended `tests/test_server.py`
+
+```bash
+uv run cascade serve --api-key dev-key
+# after some rollouts:
+curl -H "X-API-Key: dev-key" http://127.0.0.1:8765/v1/metrics
+```
+
 ### Suggested next
 
 | Priority | Item | Notes |
 |----------|------|-------|
 | 1 | WP3 frontier baseline numbers | Needs API key; fill `docs/baselines.md` Frontier section |
-| 2 | PR12 concurrency guards & metrics | max_parallel already enforced on server; histograms still open |
-| 3 | PR10 CI Linux + security docs | GitHub Actions + `docs/security.md` |
-| 4 | PR4d smoke script | `scripts/smoke_episode.py` |
+| 2 | PR10 CI Linux + security docs | GitHub Actions + `docs/security.md` |
+| 3 | PR4d smoke script | `scripts/smoke_episode.py` |
+| 4 | PR15 expanded red-team suite | Beyond light C1–C7 |
 
 ---
 
@@ -199,6 +219,7 @@ uv run python examples/scripted_solve.py
 # HTTP rollout server (remote trainers):
 # uv run cascade serve --api-key dev-key
 # uv run python examples/remote_client.py --api-key dev-key
+# curl -H "X-API-Key: dev-key" http://127.0.0.1:8765/v1/metrics
 ```
 
 ---

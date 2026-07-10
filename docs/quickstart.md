@@ -66,11 +66,14 @@ uv run python examples/remote_client.py --api-key dev-key \
 | Method | Path | Purpose |
 |--------|------|---------|
 | `GET` | `/health` | Liveness (no auth) |
+| `GET` | `/v1/metrics` | Counters + provision/step/verify histograms (auth) |
 | `POST` | `/v1/episodes` | Create / reset episode |
 | `POST` | `/v1/episodes/{id}/step` | One tool action |
 | `POST` / `DELETE` | `/v1/episodes/{id}/close` or `…/{id}` | Teardown |
 
 Auth: `X-API-Key: <key>` or `Authorization: Bearer <key>` (`CASCADE_SERVER_API_KEY`).
+
+Capacity: `CASCADE_MAX_PARALLEL_EPISODES` (default `1`; Desktop-safe). Over capacity returns **429** `CAPACITY`. Episodes past `CASCADE_EPISODE_TTL_S` (default 2h) are reaped.
 
 ## Safety
 

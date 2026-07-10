@@ -604,6 +604,14 @@ class ComposeRuntimeBackend:
             return False
 
     def _assert_debug_safe(self) -> None:
+        cfg = get_config()
+        max_par = max(1, int(cfg.max_parallel_episodes))
+        if max_par > 1:
+            raise RuntimeError(
+                "compose debug profile publishes host ports and is single-episode only; "
+                f"refuse when max_parallel_episodes={max_par} (>1). "
+                "Set CASCADE_MAX_PARALLEL_EPISODES=1 or omit CASCADE_COMPOSE_DEBUG."
+            )
         existing = [p for p in self.list_cascade_projects()]
         if existing:
             raise RuntimeError(

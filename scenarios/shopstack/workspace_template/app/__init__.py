@@ -1,0 +1,1 @@
+# Shopstack application package

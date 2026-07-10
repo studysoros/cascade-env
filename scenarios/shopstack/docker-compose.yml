@@ -1,0 +1,79 @@
+# Shopstack episode compose — NO host port publishes (parallel-safe).
+# Use docker-compose.debug.yml for single-episode local debugging only.
+name: shopstack
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://shop:shop@postgres:5432/shop
+      REDIS_URL: redis://redis:6379/0
+      SHOPSTACK_API_KEY: sk_test_cascade_demo_key
+      WORKER_CONFIG: /workspace/configs/worker.yaml
+      PYTHONPATH: /workspace
+    volumes:
+      - workspace_data:/workspace
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks: [cascade_net]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  worker:
+    build:
+      context: .
+      dockerfile: services/worker/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://shop:shop@postgres:5432/shop
+      REDIS_URL: redis://redis:6379/0
+      WORKER_CONFIG: /workspace/configs/worker.yaml
+      PYTHONPATH: /workspace
+    volumes:
+      - workspace_data:/workspace
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks: [cascade_net]
+    security_opt: ["no-new-privileges:true"]
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: shop
+      POSTGRES_PASSWORD: shop
+      POSTGRES_DB: shop
+    networks: [cascade_net]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shop"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    networks: [cascade_net]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+networks:
+  cascade_net:
+    internal: true
+
+volumes:
+  workspace_data:

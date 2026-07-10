@@ -1,4 +1,4 @@
-"""cascade CLI: doctor | gc | list-tasks | run-episode | eval-baselines."""
+"""cascade CLI: doctor | gc | list-tasks | run-episode | eval-baselines | serve."""
 
 from __future__ import annotations
 
@@ -74,6 +74,32 @@ def main(argv: list[str] | None = None) -> int:
     p_eval.add_argument("--md-out", default=None, help="Optional markdown table path")
     p_eval.add_argument("--quiet", action="store_true")
 
+    p_serve = sub.add_parser(
+        "serve",
+        help="Start HTTP rollout server (remote trainers; requires API key)",
+    )
+    p_serve.add_argument(
+        "--host",
+        default=None,
+        help="Bind host (default: CASCADE_SERVER_HOST or 127.0.0.1)",
+    )
+    p_serve.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="Bind port (default: CASCADE_SERVER_PORT or 8765)",
+    )
+    p_serve.add_argument(
+        "--api-key",
+        default=None,
+        help="Server API key (default: CASCADE_SERVER_API_KEY; auto-generated if unset)",
+    )
+    p_serve.add_argument(
+        "--log-level",
+        default="info",
+        choices=["critical", "error", "warning", "info", "debug", "trace"],
+    )
+
     args = parser.parse_args(argv)
     if args.cmd == "doctor":
         return cmd_doctor()
@@ -85,6 +111,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_run_episode(args)
     if args.cmd == "eval-baselines":
         return cmd_eval_baselines(args)
+    if args.cmd == "serve":
+        return cmd_serve(args)
     return 1
 
 
@@ -162,6 +190,12 @@ def cmd_doctor() -> int:
     orphans = list(root.glob("ep_*")) if root.is_dir() else []
     print(f"orphan_eps  {len(orphans)}")
     print(f"runtime_default {cfg.runtime} (CASCADE_RUNTIME=local|compose)")
+    print(
+        f"http_server  enable={cfg.enable_http_server} "
+        f"bind={cfg.server_host}:{cfg.server_port} "
+        f"api_key_set={bool(cfg.server_api_key)} "
+        f"(cascade serve)"
+    )
     print("SANDBOX ONLY — never attach tools to real production credentials.")
     return 0
 
@@ -315,6 +349,52 @@ def _cmd_run_episode_llm(args: argparse.Namespace) -> int:
     finally:
         env.close()
         client.close()
+
+
+def cmd_serve(args: argparse.Namespace) -> int:
+    """Start FastAPI rollout server (create / step / close episodes over HTTP).
+
+    Invoking ``cascade serve`` opts in to the HTTP server feature flag.
+    """
+    from cascade_env.server.auth import generate_api_key
+    from cascade_env.server.app import run_server
+
+    cfg = get_config()
+    api_key = (args.api_key or cfg.server_api_key or "").strip()
+    generated = False
+    if not api_key:
+        api_key = generate_api_key()
+        generated = True
+
+    host = args.host or cfg.server_host
+    port = int(args.port if args.port is not None else cfg.server_port)
+    cfg = cfg.model_copy(
+        update={
+            "enable_http_server": True,
+            "server_api_key": api_key,
+            "server_host": host,
+            "server_port": port,
+        }
+    )
+
+    print(f"cascade serve  version={__version__}")
+    print(f"  bind         http://{host}:{port}")
+    print(f"  openapi      http://{host}:{port}/docs")
+    print(f"  health       http://{host}:{port}/health")
+    if generated:
+        print(f"  api_key      {api_key}  (generated — set CASCADE_SERVER_API_KEY to pin)")
+    else:
+        print("  api_key      (from --api-key or CASCADE_SERVER_API_KEY)")
+    print("  auth         X-API-Key or Authorization: Bearer")
+    print("  SANDBOX ONLY — never attach tools to real production credentials.")
+    print("  Example client: uv run python examples/remote_client.py")
+
+    try:
+        run_server(host=host, port=port, api_key=api_key, config=cfg, log_level=args.log_level)
+    except KeyboardInterrupt:
+        print("\nshutting down")
+        return 0
+    return 0
 
 
 def cmd_eval_baselines(args: argparse.Namespace) -> int:

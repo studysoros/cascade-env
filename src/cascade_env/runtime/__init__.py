@@ -1,7 +1,13 @@
 from cascade_env.runtime.base import EpisodeHandle, RuntimeBackend
 from cascade_env.runtime.local import LocalRuntimeBackend
 
-__all__ = ["EpisodeHandle", "RuntimeBackend", "LocalRuntimeBackend"]
+__all__ = [
+    "EpisodeHandle",
+    "RuntimeBackend",
+    "LocalRuntimeBackend",
+    "ComposeRuntimeBackend",
+    "get_runtime",
+]
 
 
 def get_runtime(name: str = "local"):
@@ -12,3 +18,11 @@ def get_runtime(name: str = "local"):
 
         return ComposeRuntimeBackend()
     raise ValueError(f"Unknown runtime: {name}")
+
+
+def __getattr__(name: str):
+    if name == "ComposeRuntimeBackend":
+        from cascade_env.runtime.compose import ComposeRuntimeBackend
+
+        return ComposeRuntimeBackend
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

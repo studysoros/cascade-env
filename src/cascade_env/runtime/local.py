@@ -311,6 +311,12 @@ class LocalRuntimeBackend:
             if not path.startswith("/"):
                 path = "/" + path
             url = handle.api_base + path
+        params = args.get("params") or args.get("query")
+        if params and isinstance(params, dict):
+            from urllib.parse import urlencode
+
+            sep = "&" if "?" in url else "?"
+            url = url + sep + urlencode(params)
         headers = dict(args.get("headers") or {})
         body = args.get("json")
         try:

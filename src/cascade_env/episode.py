@@ -363,5 +363,11 @@ class EpisodeManager:
         fail_dir = self.handle.workspace / "failure"
         fail_dir.mkdir(parents=True, exist_ok=True)
         (fail_dir / "reason.txt").write_text(reason, encoding="utf-8")
+        dump = getattr(self.runtime, "dump_failure_artifacts", None)
+        if callable(dump):
+            try:
+                dump(self.handle, fail_dir)
+            except Exception:
+                pass
         if self.traj:
             self.traj.write({"type": "failure", "reason": reason})

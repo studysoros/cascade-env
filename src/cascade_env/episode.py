@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from cascade_env.config import CascadeConfig, get_config
+from cascade_env.metrics import Timer, get_metrics
 from cascade_env.reward import step_reward, terminal_reward
 from cascade_env.runtime import get_runtime
 from cascade_env.runtime.base import EpisodeHandle, RuntimeBackend
@@ -103,28 +104,43 @@ class EpisodeManager:
             }
         )
 
-        self.handle = self.runtime.provision(self.episode_id, work)
-        ok = self.runtime.wait_healthy(self.handle, timeout_s=self.config.provision_timeout_s)
-        if not ok:
-            self.phase = EpisodePhase.TEARDOWN
-            self._dump_failure("provision_failed")
-            self.close()
-            raise RuntimeError(
-                f"Failed to provision healthy stack for episode {self.episode_id}. "
-                f"See logs under {work / '.cascade_logs'}"
+        metrics = get_metrics()
+        provision_t0 = time.perf_counter()
+        provision_ok = False
+        try:
+            self.handle = self.runtime.provision(self.episode_id, work)
+            ok = self.runtime.wait_healthy(
+                self.handle, timeout_s=self.config.provision_timeout_s
             )
+            if not ok:
+                self.phase = EpisodePhase.TEARDOWN
+                self._dump_failure("provision_failed")
+                self.close()
+                raise RuntimeError(
+                    f"Failed to provision healthy stack for episode {self.episode_id}. "
+                    f"See logs under {work / '.cascade_logs'}"
+                )
 
-        self.phase = EpisodePhase.HEALTHY_BASELINE
-        # inject mutations (files already mutated pre-start for code/config;
-        # restart to ensure injected code is loaded if mutations applied before start)
-        self.phase = EpisodePhase.TASK_INJECTED
-        self.runtime.apply_pending_sql(self.handle)
-        # Restart worker/api so any pre-start file mutations are loaded
-        self.runtime.restart_services(self.handle, ["api", "worker"])
-        if not self.runtime.wait_healthy(self.handle, timeout_s=30):
-            self._dump_failure("post_inject_unhealthy")
-            self.close()
-            raise RuntimeError("Stack unhealthy after task injection")
+            self.phase = EpisodePhase.HEALTHY_BASELINE
+            # inject mutations (files already mutated pre-start for code/config;
+            # restart to ensure injected code is loaded if mutations applied before start)
+            self.phase = EpisodePhase.TASK_INJECTED
+            self.runtime.apply_pending_sql(self.handle)
+            # Restart worker/api so any pre-start file mutations are loaded
+            self.runtime.restart_services(self.handle, ["api", "worker"])
+            if not self.runtime.wait_healthy(self.handle, timeout_s=30):
+                self._dump_failure("post_inject_unhealthy")
+                self.close()
+                raise RuntimeError("Stack unhealthy after task injection")
+            provision_ok = True
+        finally:
+            provision_ms = (time.perf_counter() - provision_t0) * 1000.0
+            metrics.observe("provision_ms", provision_ms)
+            if provision_ok:
+                metrics.inc("provisions_ok")
+                metrics.inc("episodes_created")
+            else:
+                metrics.inc("provisions_failed")
 
         self.phase = EpisodePhase.AGENT_CONTROL
         obs = self._observation()
@@ -133,6 +149,7 @@ class EpisodeManager:
             "task_id": self.task.id,
             "obs": obs.model_dump(mode="json"),
             "trajectory_path": str(traj_path),
+            "provision_ms": round(provision_ms, 3),
         }
         return obs, info
 
@@ -185,7 +202,9 @@ class EpisodeManager:
             self.close()
             return obs, result.terminal_reward, True, False, info
 
-        tr = self.runtime.exec_tool(self.handle, action.tool, action.args)
+        with Timer("step_ms") as step_timer:
+            tr = self.runtime.exec_tool(self.handle, action.tool, action.args)
+        get_metrics().inc("steps_total")
         self.last_tool = tr
         reward = step_reward(self.config.step_cost)
         self.step_cost_accrued += abs(reward)
@@ -218,7 +237,10 @@ class EpisodeManager:
                         },
                     ],
                     "reward": reward,
-                    "info": {"tool_latency_ms": tr.duration_ms},
+                    "info": {
+                        "tool_latency_ms": tr.duration_ms,
+                        "step_ms": round(step_timer.elapsed_ms, 3),
+                    },
                 }
             )
 
@@ -252,6 +274,8 @@ class EpisodeManager:
                 self.traj.close()
                 self.traj = None
             self.phase = EpisodePhase.DONE
+            if self.episode_id:
+                get_metrics().inc("episodes_closed")
 
     def _materialize_workspace(self, work: Path) -> None:
         assert self.task is not None
@@ -286,11 +310,18 @@ class EpisodeManager:
     def _verify_and_score(self, *, truncated: bool) -> EpisodeResult:
         assert self.handle is not None and self.task is not None
         self.phase = EpisodePhase.VERIFYING
+        metrics = get_metrics()
         api_key = (self.handle.workspace / "configs" / "api_key.txt").read_text(
             encoding="utf-8"
         ).strip()
-        results = run_verifiers(self.runtime, self.handle, self.task, api_key=api_key)
-        success, partial, detail = evaluate_success(results, self.task)
+        with Timer("verify_ms") as verify_timer:
+            results = run_verifiers(self.runtime, self.handle, self.task, api_key=api_key)
+            success, partial, detail = evaluate_success(results, self.task)
+        metrics.inc("verifies_total")
+        if success:
+            metrics.inc("episodes_success")
+        else:
+            metrics.inc("episodes_failed")
         term_r = terminal_reward(
             success=success,
             partial=partial,
@@ -309,6 +340,7 @@ class EpisodeManager:
                     "verifiers": [r.model_dump(mode="json") for r in results],
                     "detail": detail,
                     "truncated": truncated,
+                    "verify_ms": round(verify_timer.elapsed_ms, 3),
                 }
             )
         return EpisodeResult(

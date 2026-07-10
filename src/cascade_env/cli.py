@@ -62,6 +62,12 @@ def cmd_doctor() -> int:
     print(f"work_root   {cfg.resolved_work_root()}")
     print(f"scenarios   {cfg.scenarios_dir()} exists={cfg.scenarios_dir().is_dir()}")
     print(f"packs       {cfg.packs_dir()} exists={cfg.packs_dir().is_dir()}")
+    extra = cfg.extra_pack_dirs()
+    if extra:
+        for p in extra:
+            print(f"extra_pack  {p} exists={p.is_dir()} pack_yaml={(p / 'pack.yaml').exists()}")
+    else:
+        print("extra_pack  (none — set CASCADE_EXTRA_PACKS or CASCADE_HOLDOUT_DIR for sealed packs)")
 
     docker_ok = shutil.which("docker") is not None
     print(f"docker_bin  {docker_ok}")

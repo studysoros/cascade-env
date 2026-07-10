@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from pydantic import Field
@@ -19,6 +20,18 @@ def _default_data_root() -> Path:
     if (installed / "scenarios").is_dir():
         return installed
     return repo
+
+
+def _split_path_list(raw: str) -> list[Path]:
+    """Split CASCADE_* path lists on OS pathsep and (for convenience) commas."""
+    if not raw or not raw.strip():
+        return []
+    parts: list[str] = []
+    for chunk in raw.replace(",", os.pathsep).split(os.pathsep):
+        chunk = chunk.strip().strip('"').strip("'")
+        if chunk:
+            parts.append(chunk)
+    return [Path(p).expanduser() for p in parts]
 
 
 class CascadeConfig(BaseSettings):
@@ -48,6 +61,17 @@ class CascadeConfig(BaseSettings):
     show_hints: bool = False
     pack: str = "community"
     docker_bin: str = "docker"
+    # Pathsep/comma-separated pack *directories* (each contains pack.yaml).
+    # Used for sealed holdout packs outside the public repo tree.
+    extra_packs: str = Field(
+        default="",
+        description="Extra pack dirs (os.pathsep or comma). Env: CASCADE_EXTRA_PACKS",
+    )
+    # Convenience: single sealed pack directory (alias of one entry in extra_packs).
+    holdout_dir: Path | None = Field(
+        default=None,
+        description="Path to a sealed holdout pack dir. Env: CASCADE_HOLDOUT_DIR",
+    )
 
     def resolved_data_root(self) -> Path:
         if self.data_root is not None:
@@ -67,6 +91,22 @@ class CascadeConfig(BaseSettings):
 
     def packs_dir(self) -> Path:
         return self.resolved_data_root() / "packs"
+
+    def extra_pack_dirs(self) -> list[Path]:
+        """Resolved directories that each contain a pack.yaml (sealed holdouts, etc.)."""
+        dirs = _split_path_list(self.extra_packs)
+        if self.holdout_dir is not None:
+            dirs.append(Path(self.holdout_dir).expanduser())
+        # Dedupe while preserving order
+        seen: set[str] = set()
+        out: list[Path] = []
+        for d in dirs:
+            key = str(d.resolve()) if d.exists() else str(d)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(d)
+        return out
 
 
 def get_config(**overrides: object) -> CascadeConfig:

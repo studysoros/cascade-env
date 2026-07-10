@@ -50,6 +50,28 @@ uv run cascade eval-baselines --agent scripted --seeds 0
 # uv run python examples/remote_client.py --api-key dev-key
 ```
 
+### Configuration (`.env`)
+
+Copy [`.env.example`](.env.example) to `.env` (gitignored) if you want defaults without shell exports:
+
+```bash
+cp .env.example .env   # or: Copy-Item .env.example .env
+```
+
+| Variable | Purpose |
+|----------|---------|
+| `CASCADE_SERVER_API_KEY` | Auth for **your** local `cascade serve` — any string you invent (e.g. `dev-key`) |
+| `XAI_API_KEY` / `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | Vendor keys for a real model agent only |
+
+**Scripted episodes need no vendor keys.** If you want a **real model as the agent**, set one of `XAI_API_KEY`, `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY` in `.env` (or the environment), then:
+
+```bash
+uv run cascade run-episode --agent llm --provider xai --model grok-3 \
+  --task community.T3.worker_disabled_config.v1
+```
+
+That is the only place a vendor API key matters.
+
 ### Runtime modes
 
 | Runtime | When to use |

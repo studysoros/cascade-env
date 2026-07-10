@@ -16,6 +16,19 @@ uv run cascade list-tasks
 uv run cascade run-episode --task community.T2.pagination_off_by_one.v1 --agent scripted
 ```
 
+## Compose runtime (Docker)
+
+Default runtime is `local` (no Docker). For Postgres/Redis fidelity:
+
+```bash
+# start Docker Desktop / dockerd first
+uv run python scripts/pull_images.py
+uv run cascade doctor
+uv run cascade run-episode --runtime compose --agent scripted \
+  --task community.T2.pagination_off_by_one.v1
+uv run pytest -q -m docker   # integration test when daemon is up
+```
+
 ## Python
 
 ```bash

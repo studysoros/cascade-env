@@ -121,7 +121,7 @@ packs/community/     # public task pack (L1–L3)
 packs/holdout/       # sealed holdout (gitignored; scaffold locally)
 examples/            # agent harnesses
 docs/                # design + guides
-scripts/             # scaffold_holdout_pack.py, etc.
+scripts/             # pull_images.py, scaffold_holdout_pack.py, etc.
 ```
 
 ## Commercial packaging & sealed holdouts

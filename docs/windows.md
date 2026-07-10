@@ -26,3 +26,33 @@ $env:CASCADE_RUNTIME = "local"
 uv sync --extra dev
 uv run cascade run-episode --agent scripted --task community.T2.pagination_off_by_one.v1
 ```
+
+### Compose runtime (`runtime=compose`)
+
+1. Start Docker Desktop (WSL2 backend).
+2. Pull/build images once:
+
+```powershell
+uv run python scripts/pull_images.py
+# optional: pin base image digests into scenarios/shopstack/image-pins.env
+uv run python scripts/pull_images.py --write-digests
+```
+
+3. Run an episode (no fixed host ports; tools use `docker compose exec`):
+
+```powershell
+uv run cascade run-episode --runtime compose --agent scripted --task community.T2.pagination_off_by_one.v1
+```
+
+4. Reclaim disk (workspaces + labeled compose projects):
+
+```powershell
+uv run cascade gc --ttl-hours 2
+```
+
+**Notes**
+
+- Episode compose uses an **internal** network (no egress) and bind-mounts the host workspace.
+- Ensure Docker Desktop file sharing can access `%USERPROFILE%\.cascade\episodes`.
+- Optional debug ports: `$env:CASCADE_COMPOSE_DEBUG = "1"` (single-episode only; refuses if other `cascade_*` projects are active).
+- Prefer `runtime=local` for day-to-day agent training; use compose for Postgres/Redis fidelity.

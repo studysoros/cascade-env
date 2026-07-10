@@ -37,6 +37,13 @@ uv run cascade run-episode --task community.T2.pagination_off_by_one.v1 --agent 
 # Or via Gymnasium
 uv run python examples/random_rollout.py
 uv run python examples/scripted_solve.py
+
+# Pass-rate card (scripted control baseline)
+uv run cascade eval-baselines --agent scripted --seeds 0
+
+# Real LLM tool loop (requires OPENAI_API_KEY / ANTHROPIC_API_KEY / XAI_API_KEY)
+# uv run python examples/llm_tool_loop.py --task community.T3.worker_disabled_config.v1
+# uv run cascade eval-baselines --agent llm --provider openai --model gpt-4o --seeds 0
 ```
 
 ### Runtime modes

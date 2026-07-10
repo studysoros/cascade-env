@@ -1,6 +1,6 @@
 # Cascade — build status & session handoff
 
-**Last updated:** 2026-07-10  
+**Last updated:** 2026-07-10 (WP3 implemented)  
 **Package manager:** `uv` only (`uv sync --extra dev`, `uv run …`) — not pip  
 **Lockfile:** `uv.lock` (committed)  
 **Design source of truth:** [`design-cascade.md`](./design-cascade.md)
@@ -32,7 +32,7 @@ We did **not** implement every PR in the design as separate mergeable PRs. We sh
 | PR6 | Verifiers + C1–C7 | **Partial** | Multi-verifier + sparse reward work; cheat checks are lighter than full C1–C7 suite; no `test_cheat_catalog.py` |
 | PR7 | Mutators + T1–T3 | **Done** | Plus T4–T8 (L3 multi-fault) |
 | PR8 | Gymnasium Cascade-v0 + trajectories | **Done** | Verified with scripted agent |
-| PR9 | Example agents | **Done** | scripted + LLM stub + random rollout |
+| PR9 | Example agents | **Done** | scripted + LLM stub + real `llm_tool_loop` + eval harness |
 | PR10 | CI Linux + security docs | **Not done** | No GitHub Actions; no `docs/security.md` |
 | PR11 | HTTP rollout server | **Not done** | Post-MVP / suggested next #4 |
 | PR12 | Concurrency guards & metrics | **Not done** | |
@@ -50,7 +50,9 @@ We did **not** implement every PR in the design as separate mergeable PRs. We sh
 - Sealed **holdout pack** scaffold (`scripts/scaffold_holdout_pack.py`, gitignored `packs/holdout/`)
 - Holdout load via `CASCADE_HOLDOUT_DIR` / `CASCADE_EXTRA_PACKS` / absolute `--pack` path
 - Scripted baseline solves several L1–L2 tasks (R≈0.994); L3 scripted pass ~0 (headroom)
-- `uv run cascade doctor | list-tasks | run-episode | gc`
+- Measured scripted T1–T5 card: **pass@1=0.80** (`docs/artifacts/baseline-scripted-t1-t5.json`)
+- Real LLM tool loop (`examples/llm_tool_loop.py`) + `cascade eval-baselines` (OpenAI-compatible / Anthropic / xAI)
+- `uv run cascade doctor | list-tasks | run-episode | eval-baselines | gc`
 - Docs: [`commercial.md`](./commercial.md), [`baselines.md`](./baselines.md), compose notes in [`windows.md`](./windows.md) / [`quickstart.md`](./quickstart.md)
 
 ### Default runtime
@@ -88,18 +90,32 @@ We did **not** implement every PR in the design as separate mergeable PRs. We sh
 - Linux CI job for `-m docker`
 - Debug profile auto-path in CLI (`CASCADE_COMPOSE_DEBUG=1` already supported)
 
-### WP3 — Real model baseline + pass-rate card  ← **next priority**
+### WP3 — Real model baseline + pass-rate card — **Code done; frontier numbers pending API key** (2026-07-10)
 
 **Goal:** Lab-facing capability signal.
 
-**Do:**
-- Implement `examples/llm_tool_loop.py` with OpenAI-compatible or Anthropic client (env API key)
-- Eval harness: run N seeds × task set, write JSON summary
-- Publish `docs/baselines.md` (model, date, pass@1, avg steps, cost if known)
+**Done:**
+- `examples/llm_tool_loop.py` — OpenAI-compatible + Anthropic clients via `httpx` (env API key)
+- Agent modules: `agents/tools_schema.py`, `llm_client.py`, `llm_agent.py`, `eval.py`
+- Eval harness: `cascade eval-baselines` / `scripts/eval_baselines.py` → JSON + markdown card
+- CLI: `run-episode --agent llm` with `--provider/--model/--base-url/--api-key`
+- Unit tests: `tests/test_llm_agent.py` (mocked HTTP; no network)
+- Checked-in measured **scripted** T1–T5 card: pass@1=0.80, avg steps=7.0  
+  (`docs/artifacts/baseline-scripted-t1-t5.json`)
+- [`docs/baselines.md`](./baselines.md) updated with harness docs + measured table
 
-**Done when:** one frontier model has a checked-in baseline table for T1–T5.
+**Remaining for strict “Done when” (one frontier model T1–T5 table):**
+No LLM API key was available in this session. With a key:
 
-### WP4 — HTTP rollout server
+```bash
+uv run cascade eval-baselines --agent llm --provider xai --model grok-3 --seeds 0 \
+  --out docs/artifacts/baseline-grok-3-t1-t5.json
+# paste the markdown card into docs/baselines.md Frontier section
+```
+
+Then mark WP3 fully **Done** and advance to WP4.
+
+### WP4 — HTTP rollout server  ← **next after frontier baseline numbers**
 
 **Goal:** Multi-tenant / remote trainers (design PR11).
 
@@ -121,7 +137,15 @@ We did **not** implement every PR in the design as separate mergeable PRs. We sh
 ```text
 Continue Cascade from docs/STATUS.md.
 Use uv only (uv sync, uv run …).
-Implement work package WP3 (model baseline + pass-rate card).
+Implement work package WP4 (HTTP rollout server).
+```
+
+Or finish WP3 frontier row:
+
+```text
+Continue Cascade from docs/STATUS.md.
+Run frontier baseline: set XAI_API_KEY / OPENAI_API_KEY and
+uv run cascade eval-baselines --agent llm --provider xai --model grok-3 --seeds 0
 ```
 
 3. Optionally attach or `@` mention:
@@ -144,6 +168,10 @@ uv run cascade list-tasks
 uv run cascade list-tasks --pack holdout   # after scaffold / CASCADE_HOLDOUT_DIR
 uv run cascade run-episode --task community.T2.pagination_off_by_one.v1 --agent scripted
 uv run cascade run-episode --runtime compose --agent scripted --task community.T2.pagination_off_by_one.v1
+uv run cascade eval-baselines --agent scripted --seeds 0 --out docs/artifacts/baseline-scripted-t1-t5.json
+# LLM (requires API key):
+# uv run cascade run-episode --agent llm --task community.T3.worker_disabled_config.v1
+# uv run python examples/llm_tool_loop.py --provider xai --model grok-3
 uv run python scripts/pull_images.py
 uv run python scripts/scaffold_holdout_pack.py
 uv run pytest -q

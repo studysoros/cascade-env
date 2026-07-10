@@ -33,8 +33,22 @@ uv run pytest -q -m docker   # integration test when daemon is up
 
 ```bash
 uv run python examples/scripted_solve.py
-uv run python examples/llm_tool_loop_stub.py
+uv run python examples/llm_tool_loop_stub.py   # offline stub
+# Real LLM (set OPENAI_API_KEY / ANTHROPIC_API_KEY / XAI_API_KEY):
+# uv run python examples/llm_tool_loop.py --task community.T3.worker_disabled_config.v1
 ```
+
+## Baselines / pass-rate card
+
+```bash
+# Scripted T1–T5 card → JSON + markdown under docs/artifacts/
+uv run cascade eval-baselines --agent scripted --seeds 0
+
+# Frontier model (API key required)
+# uv run cascade eval-baselines --agent llm --provider openai --model gpt-4o --seeds 0
+```
+
+See [`baselines.md`](./baselines.md).
 
 ## Safety
 

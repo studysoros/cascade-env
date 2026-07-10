@@ -1,0 +1,340 @@
+{
+  "meta": {
+    "date": "2026-07-10",
+    "agent": "scripted",
+    "model": "scripted",
+    "provider": "scripted",
+    "runtime": "local",
+    "pack": "community",
+    "tasks": [
+      "community.T1.worker_retry_storm.v1",
+      "community.T2.pagination_off_by_one.v1",
+      "community.T3.worker_disabled_config.v1",
+      "community.T4.bad_product_prices.v1",
+      "community.T5.discount_field.v1"
+    ],
+    "seeds": [
+      0
+    ],
+    "max_steps": 40,
+    "cascade_version": "0.1.0",
+    "elapsed_s": 36.31
+  },
+  "tasks": {
+    "community.T1.worker_retry_storm.v1": {
+      "n": 1,
+      "passes": 1,
+      "pass_at_1": 1.0,
+      "avg_steps": 8,
+      "avg_terminal_reward": 0.993,
+      "episodes": [
+        {
+          "task_id": "community.T1.worker_retry_storm.v1",
+          "success": true,
+          "steps": 8,
+          "terminal_reward": 0.993,
+          "total_step_reward": 0.986,
+          "truncated": false,
+          "terminated": true,
+          "verifiers": {
+            "health.all_healthy": true,
+            "http.golden_paths": true,
+            "pytest.public": true,
+            "invariants.db": true,
+            "invariants.family": true,
+            "security.auth_still_enforced": true,
+            "process.no_cheat": true
+          },
+          "trajectory_path": "ep_9bb383432bed/trajectory.jsonl",
+          "episode_id": "ep_9bb383432bed",
+          "usage": {},
+          "estimated_cost_usd": null,
+          "model": "scripted",
+          "provider": "scripted",
+          "error": null
+        }
+      ]
+    },
+    "community.T2.pagination_off_by_one.v1": {
+      "n": 1,
+      "passes": 1,
+      "pass_at_1": 1.0,
+      "avg_steps": 7,
+      "avg_terminal_reward": 0.994,
+      "episodes": [
+        {
+          "task_id": "community.T2.pagination_off_by_one.v1",
+          "success": true,
+          "steps": 7,
+          "terminal_reward": 0.994,
+          "total_step_reward": 0.988,
+          "truncated": false,
+          "terminated": true,
+          "verifiers": {
+            "health.all_healthy": true,
+            "http.golden_paths": true,
+            "pytest.public": true,
+            "invariants.db": true,
+            "invariants.family": true,
+            "security.auth_still_enforced": true,
+            "process.no_cheat": true
+          },
+          "trajectory_path": "ep_0e1d384d5b84/trajectory.jsonl",
+          "episode_id": "ep_0e1d384d5b84",
+          "usage": {},
+          "estimated_cost_usd": null,
+          "model": "scripted",
+          "provider": "scripted",
+          "error": null
+        }
+      ]
+    },
+    "community.T3.worker_disabled_config.v1": {
+      "n": 1,
+      "passes": 1,
+      "pass_at_1": 1.0,
+      "avg_steps": 7,
+      "avg_terminal_reward": 0.994,
+      "episodes": [
+        {
+          "task_id": "community.T3.worker_disabled_config.v1",
+          "success": true,
+          "steps": 7,
+          "terminal_reward": 0.994,
+          "total_step_reward": 0.988,
+          "truncated": false,
+          "terminated": true,
+          "verifiers": {
+            "health.all_healthy": true,
+            "http.golden_paths": true,
+            "pytest.public": true,
+            "invariants.db": true,
+            "invariants.family": true,
+            "security.auth_still_enforced": true,
+            "process.no_cheat": true
+          },
+          "trajectory_path": "ep_90e73d905f8c/trajectory.jsonl",
+          "episode_id": "ep_90e73d905f8c",
+          "usage": {},
+          "estimated_cost_usd": null,
+          "model": "scripted",
+          "provider": "scripted",
+          "error": null
+        }
+      ]
+    },
+    "community.T4.bad_product_prices.v1": {
+      "n": 1,
+      "passes": 0,
+      "pass_at_1": 0.0,
+      "avg_steps": 6,
+      "avg_terminal_reward": -0.005,
+      "episodes": [
+        {
+          "task_id": "community.T4.bad_product_prices.v1",
+          "success": false,
+          "steps": 6,
+          "terminal_reward": -0.005,
+          "total_step_reward": -0.01,
+          "truncated": false,
+          "terminated": true,
+          "verifiers": {
+            "health.all_healthy": true,
+            "http.golden_paths": true,
+            "pytest.public": false,
+            "invariants.db": true,
+            "invariants.family": false,
+            "security.auth_still_enforced": true,
+            "process.no_cheat": true
+          },
+          "trajectory_path": "ep_fad5e1355ea9/trajectory.jsonl",
+          "episode_id": "ep_fad5e1355ea9",
+          "usage": {},
+          "estimated_cost_usd": null,
+          "model": "scripted",
+          "provider": "scripted",
+          "error": null
+        }
+      ]
+    },
+    "community.T5.discount_field.v1": {
+      "n": 1,
+      "passes": 1,
+      "pass_at_1": 1.0,
+      "avg_steps": 7,
+      "avg_terminal_reward": 0.994,
+      "episodes": [
+        {
+          "task_id": "community.T5.discount_field.v1",
+          "success": true,
+          "steps": 7,
+          "terminal_reward": 0.994,
+          "total_step_reward": 0.988,
+          "truncated": false,
+          "terminated": true,
+          "verifiers": {
+            "health.all_healthy": true,
+            "http.golden_paths": true,
+            "pytest.public": true,
+            "invariants.db": true,
+            "invariants.family": true,
+            "security.auth_still_enforced": true,
+            "process.no_cheat": true
+          },
+          "trajectory_path": "ep_16bd6e0f3f70/trajectory.jsonl",
+          "episode_id": "ep_16bd6e0f3f70",
+          "usage": {},
+          "estimated_cost_usd": null,
+          "model": "scripted",
+          "provider": "scripted",
+          "error": null
+        }
+      ]
+    }
+  },
+  "summary": {
+    "n_episodes": 5,
+    "passes": 4,
+    "pass_at_1": 0.8,
+    "avg_steps": 7,
+    "avg_terminal_reward": 0.794,
+    "usage_total": {
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0
+    },
+    "estimated_cost_usd_total": null
+  },
+  "episodes": [
+    {
+      "task_id": "community.T1.worker_retry_storm.v1",
+      "success": true,
+      "steps": 8,
+      "terminal_reward": 0.993,
+      "total_step_reward": 0.986,
+      "truncated": false,
+      "terminated": true,
+      "verifiers": {
+        "health.all_healthy": true,
+        "http.golden_paths": true,
+        "pytest.public": true,
+        "invariants.db": true,
+        "invariants.family": true,
+        "security.auth_still_enforced": true,
+        "process.no_cheat": true
+      },
+      "trajectory_path": "ep_9bb383432bed/trajectory.jsonl",
+      "episode_id": "ep_9bb383432bed",
+      "usage": {},
+      "estimated_cost_usd": null,
+      "model": "scripted",
+      "provider": "scripted",
+      "error": null,
+      "seed": 0
+    },
+    {
+      "task_id": "community.T2.pagination_off_by_one.v1",
+      "success": true,
+      "steps": 7,
+      "terminal_reward": 0.994,
+      "total_step_reward": 0.988,
+      "truncated": false,
+      "terminated": true,
+      "verifiers": {
+        "health.all_healthy": true,
+        "http.golden_paths": true,
+        "pytest.public": true,
+        "invariants.db": true,
+        "invariants.family": true,
+        "security.auth_still_enforced": true,
+        "process.no_cheat": true
+      },
+      "trajectory_path": "ep_0e1d384d5b84/trajectory.jsonl",
+      "episode_id": "ep_0e1d384d5b84",
+      "usage": {},
+      "estimated_cost_usd": null,
+      "model": "scripted",
+      "provider": "scripted",
+      "error": null,
+      "seed": 0
+    },
+    {
+      "task_id": "community.T3.worker_disabled_config.v1",
+      "success": true,
+      "steps": 7,
+      "terminal_reward": 0.994,
+      "total_step_reward": 0.988,
+      "truncated": false,
+      "terminated": true,
+      "verifiers": {
+        "health.all_healthy": true,
+        "http.golden_paths": true,
+        "pytest.public": true,
+        "invariants.db": true,
+        "invariants.family": true,
+        "security.auth_still_enforced": true,
+        "process.no_cheat": true
+      },
+      "trajectory_path": "ep_90e73d905f8c/trajectory.jsonl",
+      "episode_id": "ep_90e73d905f8c",
+      "usage": {},
+      "estimated_cost_usd": null,
+      "model": "scripted",
+      "provider": "scripted",
+      "error": null,
+      "seed": 0
+    },
+    {
+      "task_id": "community.T4.bad_product_prices.v1",
+      "success": false,
+      "steps": 6,
+      "terminal_reward": -0.005,
+      "total_step_reward": -0.01,
+      "truncated": false,
+      "terminated": true,
+      "verifiers": {
+        "health.all_healthy": true,
+        "http.golden_paths": true,
+        "pytest.public": false,
+        "invariants.db": true,
+        "invariants.family": false,
+        "security.auth_still_enforced": true,
+        "process.no_cheat": true
+      },
+      "trajectory_path": "ep_fad5e1355ea9/trajectory.jsonl",
+      "episode_id": "ep_fad5e1355ea9",
+      "usage": {},
+      "estimated_cost_usd": null,
+      "model": "scripted",
+      "provider": "scripted",
+      "error": null,
+      "seed": 0
+    },
+    {
+      "task_id": "community.T5.discount_field.v1",
+      "success": true,
+      "steps": 7,
+      "terminal_reward": 0.994,
+      "total_step_reward": 0.988,
+      "truncated": false,
+      "terminated": true,
+      "verifiers": {
+        "health.all_healthy": true,
+        "http.golden_paths": true,
+        "pytest.public": true,
+        "invariants.db": true,
+        "invariants.family": true,
+        "security.auth_still_enforced": true,
+        "process.no_cheat": true
+      },
+      "trajectory_path": "ep_16bd6e0f3f70/trajectory.jsonl",
+      "episode_id": "ep_16bd6e0f3f70",
+      "usage": {},
+      "estimated_cost_usd": null,
+      "model": "scripted",
+      "provider": "scripted",
+      "error": null,
+      "seed": 0
+    }
+  ]
+}

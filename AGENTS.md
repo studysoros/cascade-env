@@ -11,6 +11,7 @@ uv sync --extra dev
 uv run cascade doctor
 uv run cascade list-tasks
 uv run cascade run-episode --task community.T2.pagination_off_by_one.v1 --agent scripted
+uv run cascade eval-baselines --agent scripted --seeds 0
 uv run pytest -q
 ```
 

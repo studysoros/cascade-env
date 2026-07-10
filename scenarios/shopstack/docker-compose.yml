@@ -1,20 +1,33 @@
 # Shopstack episode compose — NO host port publishes (parallel-safe).
+# Workspace is bind-mounted from CASCADE_WORKSPACE (host episode dir).
 # Use docker-compose.debug.yml for single-episode local debugging only.
 name: shopstack
 
+x-cascade-labels: &cascade-labels
+  com.cascade.episode_id: ${CASCADE_EPISODE_ID:-unknown}
+  com.cascade.created_at: ${CASCADE_CREATED_AT:-0}
+  com.cascade.version: ${CASCADE_VERSION:-0.1.0}
+
+x-app-environment: &app-environment
+  DATABASE_URL: postgresql+psycopg://shop:shop@postgres:5432/shop
+  REDIS_URL: redis://redis:6379/0
+  SHOPSTACK_API_KEY: ${SHOPSTACK_API_KEY:-sk_test_cascade_demo_key}
+  WORKER_CONFIG: /workspace/configs/worker.yaml
+  PYTHONPATH: /workspace
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
 services:
   api:
+    image: ${CASCADE_API_IMAGE:-cascade/shopstack-api:dev}
     build:
       context: .
       dockerfile: services/api/Dockerfile
     environment:
-      DATABASE_URL: postgresql+psycopg://shop:shop@postgres:5432/shop
-      REDIS_URL: redis://redis:6379/0
-      SHOPSTACK_API_KEY: sk_test_cascade_demo_key
-      WORKER_CONFIG: /workspace/configs/worker.yaml
-      PYTHONPATH: /workspace
+      <<: *app-environment
     volumes:
-      - workspace_data:/workspace
+      - type: bind
+        source: ${CASCADE_WORKSPACE:?set CASCADE_WORKSPACE to the episode workspace}
+        target: /workspace
     depends_on:
       postgres:
         condition: service_healthy
@@ -22,39 +35,69 @@ services:
         condition: service_healthy
     networks: [cascade_net]
     security_opt: ["no-new-privileges:true"]
+    labels:
+      <<: *cascade-labels
+      com.cascade.service: api
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')",
+        ]
       interval: 5s
       timeout: 3s
       retries: 12
+      start_period: 10s
 
   worker:
+    image: ${CASCADE_WORKER_IMAGE:-cascade/shopstack-worker:dev}
     build:
       context: .
       dockerfile: services/worker/Dockerfile
     environment:
-      DATABASE_URL: postgresql+psycopg://shop:shop@postgres:5432/shop
-      REDIS_URL: redis://redis:6379/0
-      WORKER_CONFIG: /workspace/configs/worker.yaml
-      PYTHONPATH: /workspace
+      <<: *app-environment
     volumes:
-      - workspace_data:/workspace
+      - type: bind
+        source: ${CASCADE_WORKSPACE:?set CASCADE_WORKSPACE to the episode workspace}
+        target: /workspace
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      api:
+        condition: service_healthy
     networks: [cascade_net]
     security_opt: ["no-new-privileges:true"]
+    labels:
+      <<: *cascade-labels
+      com.cascade.service: worker
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import os,redis; redis.Redis.from_url(os.environ['REDIS_URL']).ping()",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
 
   postgres:
-    image: postgres:16-alpine
+    image: ${CASCADE_POSTGRES_IMAGE:-postgres:16-alpine}
     environment:
       POSTGRES_USER: shop
       POSTGRES_PASSWORD: shop
       POSTGRES_DB: shop
     networks: [cascade_net]
     security_opt: ["no-new-privileges:true"]
+    labels:
+      <<: *cascade-labels
+      com.cascade.service: postgres
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U shop"]
       interval: 5s
@@ -62,9 +105,12 @@ services:
       retries: 10
 
   redis:
-    image: redis:7-alpine
+    image: ${CASCADE_REDIS_IMAGE:-redis:7-alpine}
     networks: [cascade_net]
     security_opt: ["no-new-privileges:true"]
+    labels:
+      <<: *cascade-labels
+      com.cascade.service: redis
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -73,7 +119,7 @@ services:
 
 networks:
   cascade_net:
+    # Internal: no egress from containers; host tools use `docker compose exec`.
     internal: true
-
-volumes:
-  workspace_data:
+    labels:
+      <<: *cascade-labels

@@ -1,0 +1,15 @@
+# Debug overlay: publish host ports for a single local episode.
+# Refuse when other cascade_* projects are active (ComposeRuntimeBackend enforces).
+# Usage (manual):
+#   export CASCADE_WORKSPACE=/path/to/ep_xxx
+#   docker compose -p cascade_debug -f docker-compose.yml -f docker-compose.debug.yml up
+services:
+  api:
+    ports:
+      - "127.0.0.1:18000:8000"
+  postgres:
+    ports:
+      - "127.0.0.1:15432:5432"
+  redis:
+    ports:
+      - "127.0.0.1:16379:6379"

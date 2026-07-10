@@ -1,6 +1,6 @@
 # Cascade — build status & session handoff
 
-**Last updated:** 2026-07-10 (WP3 implemented)  
+**Last updated:** 2026-07-10 (WP4 implemented)  
 **Package manager:** `uv` only (`uv sync --extra dev`, `uv run …`) — not pip  
 **Lockfile:** `uv.lock` (committed)  
 **Design source of truth:** [`design-cascade.md`](./design-cascade.md)
@@ -34,7 +34,7 @@ We did **not** implement every PR in the design as separate mergeable PRs. We sh
 | PR8 | Gymnasium Cascade-v0 + trajectories | **Done** | Verified with scripted agent |
 | PR9 | Example agents | **Done** | scripted + LLM stub + real `llm_tool_loop` + eval harness |
 | PR10 | CI Linux + security docs | **Not done** | No GitHub Actions; no `docs/security.md` |
-| PR11 | HTTP rollout server | **Not done** | Post-MVP / suggested next #4 |
+| PR11 | HTTP rollout server | **Done** | `cascade serve` + FastAPI `/v1/episodes`; WP4 |
 | PR12 | Concurrency guards & metrics | **Not done** | |
 | PR13 | T4–T5 + sampling | **Mostly done** | Tasks exist; sampling is basic `sample_task_id` |
 | PR14 | Licensing / commercial docs | **Done** | [`commercial.md`](./commercial.md) + holdout load path |
@@ -52,7 +52,7 @@ We did **not** implement every PR in the design as separate mergeable PRs. We sh
 - Scripted baseline solves several L1–L2 tasks (R≈0.994); L3 scripted pass ~0 (headroom)
 - Measured scripted T1–T5 card: **pass@1=0.80** (`docs/artifacts/baseline-scripted-t1-t5.json`)
 - Real LLM tool loop (`examples/llm_tool_loop.py`) + `cascade eval-baselines` (OpenAI-compatible / Anthropic / xAI)
-- `uv run cascade doctor | list-tasks | run-episode | eval-baselines | gc`
+- `uv run cascade doctor | list-tasks | run-episode | eval-baselines | gc | serve`
 - Docs: [`commercial.md`](./commercial.md), [`baselines.md`](./baselines.md), compose notes in [`windows.md`](./windows.md) / [`quickstart.md`](./quickstart.md)
 
 ### Default runtime
@@ -115,17 +115,36 @@ uv run cascade eval-baselines --agent llm --provider xai --model grok-3 --seeds 
 
 Then mark WP3 fully **Done** and advance to WP4.
 
-### WP4 — HTTP rollout server  ← **next after frontier baseline numbers**
+### WP4 — HTTP rollout server — **Done** (2026-07-10)
 
 **Goal:** Multi-tenant / remote trainers (design PR11).
 
-**Do:**
-- `src/cascade_env/server/` FastAPI: create episode, step, close
-- Auth via API key header
-- Feature flag / `cascade serve`
-- OpenAPI + example remote client
+**Done:**
+- `src/cascade_env/server/` FastAPI: `POST /v1/episodes`, `POST …/step`, `POST|DELETE …/close`
+- Auth via `X-API-Key` or `Authorization: Bearer` (`CASCADE_SERVER_API_KEY`)
+- Feature flag `CASCADE_ENABLE_HTTP_SERVER` + opt-in CLI `cascade serve` (sets flag on start)
+- OpenAPI at `/docs`; health at `/health` (unauthenticated)
+- Example: `examples/remote_client.py`
+- Tests: `tests/test_server.py` (auth, capacity 429, full scripted episode over HTTP)
 
-**Done when:** remote client can complete one scripted episode over HTTP.
+**Done when (met):** remote TestClient / `examples/remote_client.py` completes one scripted episode over HTTP.
+
+```bash
+# Terminal A
+uv run cascade serve --api-key dev-key
+# Terminal B
+uv run python examples/remote_client.py --api-key dev-key \
+  --task community.T2.pagination_off_by_one.v1
+```
+
+### Suggested next
+
+| Priority | Item | Notes |
+|----------|------|-------|
+| 1 | WP3 frontier baseline numbers | Needs API key; fill `docs/baselines.md` Frontier section |
+| 2 | PR12 concurrency guards & metrics | max_parallel already enforced on server; histograms still open |
+| 3 | PR10 CI Linux + security docs | GitHub Actions + `docs/security.md` |
+| 4 | PR4d smoke script | `scripts/smoke_episode.py` |
 
 ---
 
@@ -137,7 +156,7 @@ Then mark WP3 fully **Done** and advance to WP4.
 ```text
 Continue Cascade from docs/STATUS.md.
 Use uv only (uv sync, uv run …).
-Implement work package WP4 (HTTP rollout server).
+Implement the highest-priority open work package.
 ```
 
 Or finish WP3 frontier row:
@@ -177,6 +196,9 @@ uv run python scripts/scaffold_holdout_pack.py
 uv run pytest -q
 uv run pytest -q -m docker
 uv run python examples/scripted_solve.py
+# HTTP rollout server (remote trainers):
+# uv run cascade serve --api-key dev-key
+# uv run python examples/remote_client.py --api-key dev-key
 ```
 
 ---

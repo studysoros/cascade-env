@@ -50,6 +50,28 @@ uv run cascade eval-baselines --agent scripted --seeds 0
 
 See [`baselines.md`](./baselines.md).
 
+## HTTP rollout server (remote trainers)
+
+Same Gymnasium step semantics over HTTP (API-key auth). OpenAPI at `/docs`.
+
+```bash
+# Terminal A — start server (prints generated key if --api-key omitted)
+uv run cascade serve --api-key dev-key
+
+# Terminal B — complete one scripted episode remotely
+uv run python examples/remote_client.py --api-key dev-key \
+  --task community.T2.pagination_off_by_one.v1
+```
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/health` | Liveness (no auth) |
+| `POST` | `/v1/episodes` | Create / reset episode |
+| `POST` | `/v1/episodes/{id}/step` | One tool action |
+| `POST` / `DELETE` | `/v1/episodes/{id}/close` or `…/{id}` | Teardown |
+
+Auth: `X-API-Key: <key>` or `Authorization: Bearer <key>` (`CASCADE_SERVER_API_KEY`).
+
 ## Safety
 
 Cascade is a **sandbox**. Never attach tools to production systems.

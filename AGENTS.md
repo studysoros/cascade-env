@@ -12,12 +12,13 @@ uv run cascade doctor
 uv run cascade list-tasks
 uv run cascade run-episode --task community.T2.pagination_off_by_one.v1 --agent scripted
 uv run cascade eval-baselines --agent scripted --seeds 0
+uv run cascade serve --api-key dev-key
 uv run pytest -q
 ```
 
 ## Layout
 
-- `src/cascade_env/` — control plane, Gym env, tools, verifiers
+- `src/cascade_env/` — control plane, Gym env, tools, verifiers, HTTP server
 - `scenarios/shopstack/` — application under test
 - `packs/community/` — public tasks T1–T8 (incl. L3 multi-fault)
 - `packs/holdout/` — sealed holdout (gitignored; `scripts/scaffold_holdout_pack.py`)

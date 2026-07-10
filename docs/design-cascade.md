@@ -897,7 +897,16 @@ Overview claim: **designed for large-scale parallel episodes on Linux clusters**
 
 ### HTTP rollout server
 
-**Post-MVP (PR11).** Same step semantics; API key for hosted multi-tenant.
+**PR11 / WP4 (implemented).** Same step semantics as Gymnasium; API key for hosted multi-tenant.
+
+| Method | Path | Auth | Purpose |
+|--------|------|------|---------|
+| `GET` | `/health` | No | Liveness / version |
+| `POST` | `/v1/episodes` | Yes | Create episode (`reset`) |
+| `POST` | `/v1/episodes/{id}/step` | Yes | One tool action |
+| `POST` / `DELETE` | `/v1/episodes/{id}/close` or `…/{id}` | Yes | Teardown |
+
+Start: `cascade serve --api-key …` (OpenAPI at `/docs`). Client example: `examples/remote_client.py`. Config: `CASCADE_SERVER_API_KEY`, `CASCADE_SERVER_HOST/PORT`, `CASCADE_MAX_PARALLEL_EPISODES`.
 
 ---
 

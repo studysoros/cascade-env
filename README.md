@@ -44,6 +44,10 @@ uv run cascade eval-baselines --agent scripted --seeds 0
 # Real LLM tool loop (requires OPENAI_API_KEY / ANTHROPIC_API_KEY / XAI_API_KEY)
 # uv run python examples/llm_tool_loop.py --task community.T3.worker_disabled_config.v1
 # uv run cascade eval-baselines --agent llm --provider openai --model gpt-4o --seeds 0
+
+# HTTP rollout server (remote trainers; OpenAPI at /docs)
+# uv run cascade serve --api-key dev-key
+# uv run python examples/remote_client.py --api-key dev-key
 ```
 
 ### Runtime modes
@@ -106,11 +110,23 @@ env.close()
 
 L3 tasks intentionally leave **scripted-agent headroom** (compound faults + red herrings). See [`docs/baselines.md`](docs/baselines.md).
 
+## HTTP rollout API
+
+Remote trainers can drive the same episode loop over HTTP:
+
+```bash
+uv run cascade serve --api-key dev-key
+# POST /v1/episodes  →  POST /v1/episodes/{id}/step  →  close
+uv run python examples/remote_client.py --api-key dev-key
+```
+
+Auth: `X-API-Key` or `Authorization: Bearer`. Config: `CASCADE_SERVER_API_KEY`, `CASCADE_SERVER_HOST`, `CASCADE_SERVER_PORT`, `CASCADE_MAX_PARALLEL_EPISODES`.
+
 ## Architecture
 
 ```
 Trainer / Agent
-    → CascadeEnv (Gymnasium)
+    → CascadeEnv (Gymnasium)  OR  HTTP /v1/episodes (cascade serve)
         → EpisodeManager
             → RuntimeBackend (local | compose)
             → Tool adapters (files, http, logs, services, db, shell, tests, submit)

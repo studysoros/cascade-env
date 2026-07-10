@@ -1,0 +1,36 @@
+api_version: cascade/v1
+task:
+  id: community.T3.worker_disabled_config.v1
+  family: config_repair
+  tier: L1
+  scenario: shopstack
+  seed_policy: required
+  tools:
+    allow: [files.*, http.*, logs.*, services.*, db.query, shell.exec, tests.run, submit.done]
+  brief:
+    title: Fulfillment worker appears dead after deploy
+    description: |
+      After a config change, orders sit in paid forever. No code deploy happened.
+      Inspect configuration, restore correct worker settings, and verify fulfillment.
+    public_success_criteria:
+      - Worker processes orders to fulfilled
+      - Public tests pass
+    constraints:
+      - Prefer config fix over rewriting core business logic
+  mutations:
+    - type: config.set
+      path: configs/worker.yaml
+      key: enabled
+      value: false
+    - type: config.set
+      path: configs/worker.yaml
+      key: max_retries
+      value: 3
+  verifiers:
+    success_requires:
+      all_of: [health.all_healthy, http.golden_paths, pytest.public, invariants.db, invariants.family]
+      not_fail: [process.no_cheat, security.auth_still_enforced]
+  metadata:
+    tags: [config, worker]
+  budgets:
+    max_steps: 25

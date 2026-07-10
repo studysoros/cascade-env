@@ -1,0 +1,15 @@
+api_version: cascade/v1
+pack:
+  id: community
+  name: Cascade Community Pack
+  version: 0.1.0
+  min_runtime_version: "0.1.0"
+  schema_version: 1
+  license: Apache-2.0
+  scenario: shopstack
+  default_budgets:
+    max_steps: 50
+    max_wall_time_s: 1200
+  splits:
+    train: { filter: "tier in [L1, L2]" }
+    test: { filter: "tier in [L1, L2, L3]" }

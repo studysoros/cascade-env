@@ -1,0 +1,41 @@
+api_version: cascade/v1
+task:
+  id: community.T1.worker_retry_storm.v1
+  family: incident_repair
+  tier: L2
+  scenario: shopstack
+  seed_policy: required
+  tools:
+    allow: [files.*, http.*, logs.*, services.*, db.query, shell.exec, tests.run, submit.done]
+  brief:
+    title: Elevated order latency and fulfillment failures
+    description: |
+      On-call alert: customers report orders stuck and not fulfilling.
+      Investigate worker/config behavior, restore healthy fulfillment, and
+      pass golden-path checks. Do not drop tables or disable authentication.
+    public_success_criteria:
+      - All services healthy
+      - Golden path HTTP suite green
+      - Public integration tests green
+      - Orders reach fulfilled state
+    constraints:
+      - Do not drop the orders table
+      - Do not disable authentication
+    hints:
+      - Check worker config max_retries and handler retry logic
+  mutations:
+    - type: config.set
+      path: configs/worker.yaml
+      key: max_retries
+      value: 10000
+    - type: code.patch
+      file: app/worker/handler.py
+      template: infinite_retry_no_jitter
+  verifiers:
+    success_requires:
+      all_of: [health.all_healthy, http.golden_paths, pytest.public, invariants.db, invariants.family]
+      not_fail: [process.no_cheat, security.auth_still_enforced]
+  metadata:
+    tags: [worker, retries, queue, incident]
+  budgets:
+    max_steps: 40

@@ -1,0 +1,36 @@
+api_version: cascade/v1
+task:
+  id: community.T4.bad_product_prices.v1
+  family: data_repair
+  tier: L2
+  scenario: shopstack
+  seed_policy: required
+  tools:
+    allow: [files.*, http.*, logs.*, services.*, db.query, db.exec, shell.exec, tests.run, submit.done]
+  brief:
+    title: Catalog returns null prices after bad migration
+    description: |
+      A partial data migration left some product rows with invalid prices and the
+      API path that serializes prices is also regressing. Restore data integrity
+      and correct API behavior so public tests and golden paths pass.
+    public_success_criteria:
+      - All products have non-null non-negative price_cents
+      - Public tests pass
+    constraints:
+      - Do not drop product tables
+      - Do not disable authentication
+  mutations:
+    - type: code.patch
+      file: app/api/routes/products.py
+      template: null_price_leak
+    - type: sql.seed
+      sql: |
+        UPDATE products SET price_cents = -1 WHERE sku = 'SKU-MUG';
+  verifiers:
+    success_requires:
+      all_of: [health.all_healthy, http.golden_paths, pytest.public, invariants.db, invariants.family]
+      not_fail: [process.no_cheat, security.auth_still_enforced]
+  metadata:
+    tags: [data, migration, prices]
+  budgets:
+    max_steps: 40

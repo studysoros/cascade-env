@@ -1,0 +1,30 @@
+api_version: cascade/v1
+task:
+  id: community.T5.discount_field.v1
+  family: feature_ship
+  tier: L2
+  scenario: shopstack
+  seed_policy: required
+  tools:
+    allow: [files.*, http.*, logs.*, services.*, db.query, shell.exec, tests.run, submit.done]
+  brief:
+    title: Ship discount_cents on product responses
+    description: |
+      Product wants a non-breaking API addition: every product JSON object must
+      include discount_cents (integer, default 0). Do not break existing catalog
+      or order flows. Auth must remain enforced.
+    public_success_criteria:
+      - Product payloads include discount_cents
+      - Public tests and golden path still pass
+    constraints:
+      - Do not disable authentication
+      - Do not remove existing fields
+  mutations: []
+  verifiers:
+    success_requires:
+      all_of: [health.all_healthy, http.golden_paths, pytest.public, invariants.db, invariants.family]
+      not_fail: [process.no_cheat, security.auth_still_enforced]
+  metadata:
+    tags: [feature, api]
+  budgets:
+    max_steps: 35

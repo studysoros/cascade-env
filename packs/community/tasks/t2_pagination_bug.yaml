@@ -1,0 +1,34 @@
+api_version: cascade/v1
+task:
+  id: community.T2.pagination_off_by_one.v1
+  family: bugfix
+  tier: L1
+  scenario: shopstack
+  seed_policy: required
+  tools:
+    allow: [files.*, http.*, logs.*, services.*, db.query, shell.exec, tests.run, submit.done]
+  brief:
+    title: Product catalog page 1 returns empty
+    description: |
+      Merchandising reports that the product catalog is empty on the first page
+      even though inventory exists in the database. Fix the runtime bug and
+      restore public tests.
+    public_success_criteria:
+      - GET /v1/products?page=1 returns products
+      - Public tests pass
+      - Golden path still works
+    constraints:
+      - Do not disable authentication
+      - Do not hardcode fake product lists outside the database
+  mutations:
+    - type: code.patch
+      file: app/api/routes/products.py
+      template: pagination_off_by_one
+  verifiers:
+    success_requires:
+      all_of: [health.all_healthy, http.golden_paths, pytest.public, invariants.db, invariants.family]
+      not_fail: [process.no_cheat, security.auth_still_enforced]
+  metadata:
+    tags: [api, pagination, bugfix]
+  budgets:
+    max_steps: 30

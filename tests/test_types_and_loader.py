@@ -14,7 +14,7 @@ def test_load_community_pack():
     packs = loader.list_packs()
     assert "community" in packs
     tasks = loader.list_tasks("community")
-    assert len(tasks) >= 5
+    assert len(tasks) >= 8
     t = loader.load_task("community", "community.T2.pagination_off_by_one.v1")
     assert t.family == "bugfix"
     assert t.mutations

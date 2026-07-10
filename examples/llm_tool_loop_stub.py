@@ -1,7 +1,10 @@
 """
 Stub showing how to wire an LLM tool-calling loop to Cascade.
 
-Replace `call_model` with your lab's inference client (OpenAI, Anthropic, vLLM, etc.).
+For a **real** OpenAI-compatible / Anthropic client, use:
+  uv run python examples/llm_tool_loop.py --task community.T3.worker_disabled_config.v1
+
+Replace `call_model` below with your lab's inference client if you prefer a custom harness.
 """
 
 from __future__ import annotations

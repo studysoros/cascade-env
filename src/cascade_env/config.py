@@ -72,6 +72,17 @@ class CascadeConfig(BaseSettings):
         default=None,
         description="Path to a sealed holdout pack dir. Env: CASCADE_HOLDOUT_DIR",
     )
+    # HTTP rollout server (WP4 / PR11). Serving is opt-in via `cascade serve`.
+    enable_http_server: bool = Field(
+        default=False,
+        description="Feature flag for HTTP rollout server. Env: CASCADE_ENABLE_HTTP_SERVER",
+    )
+    server_api_key: str = Field(
+        default="",
+        description="API key for rollout server auth. Env: CASCADE_SERVER_API_KEY",
+    )
+    server_host: str = Field(default="127.0.0.1", description="Default bind host for cascade serve")
+    server_port: int = Field(default=8765, description="Default bind port for cascade serve")
 
     def resolved_data_root(self) -> Path:
         if self.data_root is not None:

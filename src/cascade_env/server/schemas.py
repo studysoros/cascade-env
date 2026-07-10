@@ -50,6 +50,16 @@ class HealthResponse(BaseModel):
     max_parallel_episodes: int
 
 
+class MetricsResponse(BaseModel):
+    """Process-local counters and latency histograms (no Prometheus)."""
+
+    uptime_s: float
+    active_episodes: int
+    max_parallel_episodes: int
+    counters: dict[str, int]
+    histograms: dict[str, dict[str, Any]]
+
+
 class ErrorBody(BaseModel):
     detail: str
     error_code: str | None = None

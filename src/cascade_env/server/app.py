@@ -7,6 +7,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from cascade_env.config import CascadeConfig, get_config
+from cascade_env.metrics import get_metrics
 from cascade_env.server.auth import ApiKeyAuth
 from cascade_env.server.schemas import (
     ActionRequest,
@@ -14,6 +15,7 @@ from cascade_env.server.schemas import (
     CreateEpisodeRequest,
     CreateEpisodeResponse,
     HealthResponse,
+    MetricsResponse,
     StepResponse,
 )
 from cascade_env.server.session import SessionError, SessionStore
@@ -80,6 +82,23 @@ def create_app(
     @app.get("/v1/health", response_model=HealthResponse, tags=["ops"])
     def health_v1(_: str = Depends(auth)) -> HealthResponse:
         return health()
+
+    @app.get(
+        "/v1/metrics",
+        response_model=MetricsResponse,
+        tags=["ops"],
+        summary="Counters and provision/step/verify latency histograms",
+    )
+    def metrics_endpoint(_: str = Depends(auth)) -> MetricsResponse:
+        """Auth-required metrics snapshot (process-local; not Prometheus scrape format)."""
+        snap = get_metrics().snapshot()
+        return MetricsResponse(
+            uptime_s=float(snap["uptime_s"]),
+            active_episodes=sessions.active_count,
+            max_parallel_episodes=max(1, int(cfg.max_parallel_episodes)),
+            counters=dict(snap["counters"]),
+            histograms=dict(snap["histograms"]),
+        )
 
     @app.post(
         "/v1/episodes",

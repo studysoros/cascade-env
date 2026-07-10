@@ -10,6 +10,7 @@ from typing import Any
 
 from cascade_env.config import CascadeConfig, get_config
 from cascade_env.env import CascadeEnv
+from cascade_env.metrics import get_metrics
 from cascade_env.server.schemas import CreateEpisodeRequest
 from cascade_env.types import Action
 
@@ -27,6 +28,7 @@ class EpisodeSession:
     episode_id: str
     env: CascadeEnv | None
     created_at: float = field(default_factory=time.time)
+    last_active_at: float = field(default_factory=time.time)
     closed: bool = False
     lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -36,12 +38,26 @@ class EpisodeSession:
 
 
 class SessionStore:
-    """Thread-safe multi-episode store with max-parallel enforcement."""
+    """Thread-safe multi-episode store with max-parallel enforcement and TTL reap."""
 
-    def __init__(self, config: CascadeConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: CascadeConfig | None = None,
+        *,
+        enable_ttl_reaper: bool = True,
+    ) -> None:
         self.config = config or get_config()
         self._sessions: dict[str, EpisodeSession] = {}
         self._lock = threading.Lock()
+        self._reaper_stop = threading.Event()
+        self._reaper: threading.Thread | None = None
+        if enable_ttl_reaper and self.config.episode_ttl_s > 0:
+            self._reaper = threading.Thread(
+                target=self._ttl_reaper_loop,
+                name="cascade-session-ttl",
+                daemon=True,
+            )
+            self._reaper.start()
 
     @property
     def active_count(self) -> int:
@@ -49,11 +65,15 @@ class SessionStore:
             return sum(1 for s in self._sessions.values() if not s.closed)
 
     def create(self, req: CreateEpisodeRequest) -> tuple[str, dict[str, Any], dict[str, Any]]:
+        # Drop expired sessions first so TTL free slots for new work.
+        self.reap_expired()
+
         # Reserve a slot before slow provision so concurrent creates cannot oversubscribe.
         with self._lock:
             active = sum(1 for s in self._sessions.values() if not s.closed)
             max_par = max(1, int(self.config.max_parallel_episodes))
             if active >= max_par:
+                get_metrics().inc("capacity_rejects")
                 raise SessionError(
                     f"max_parallel_episodes={max_par} reached ({active} active)",
                     status_code=429,
@@ -109,10 +129,18 @@ class SessionStore:
         with session.lock:
             if session.closed or session.env is None:
                 raise SessionError("episode already closed", status_code=409, error_code="CLOSED")
+            if self._is_expired(session):
+                self._close_locked(session, reaped=True)
+                raise SessionError(
+                    f"episode expired (ttl={self.config.episode_ttl_s}s)",
+                    status_code=410,
+                    error_code="EXPIRED",
+                )
             try:
                 obs_s, reward, terminated, truncated, info = session.env.step(action)
             except RuntimeError as exc:
                 raise SessionError(str(exc), status_code=409, error_code="INACTIVE") from exc
+            session.last_active_at = time.time()
             observation = json.loads(obs_s) if isinstance(obs_s, str) else dict(obs_s)
             wire_info = {k: v for k, v in info.items() if k != "obs"}
             if terminated or truncated:
@@ -130,10 +158,7 @@ class SessionStore:
                     error_code="NOT_FOUND",
                 )
         with session.lock:
-            if not session.closed:
-                if session.env is not None:
-                    session.env.close()
-                session.closed = True
+            self._close_locked(session, reaped=False)
             return True
 
     def get_session(self, episode_id: str) -> EpisodeSession | None:
@@ -141,6 +166,7 @@ class SessionStore:
             return self._sessions.get(episode_id)
 
     def close_all(self) -> int:
+        self._reaper_stop.set()
         with self._lock:
             ids = list(self._sessions.keys())
         n = 0
@@ -151,6 +177,51 @@ class SessionStore:
             except SessionError:
                 pass
         return n
+
+    def reap_expired(self) -> int:
+        """Close sessions past episode_ttl_s. Returns number reaped."""
+        ttl = float(self.config.episode_ttl_s)
+        if ttl <= 0:
+            return 0
+        now = time.time()
+        with self._lock:
+            candidates = [
+                s
+                for s in self._sessions.values()
+                if not s.closed and (now - s.created_at) >= ttl
+            ]
+        reaped = 0
+        for session in candidates:
+            with session.lock:
+                if session.closed:
+                    continue
+                if (time.time() - session.created_at) < ttl:
+                    continue
+                self._close_locked(session, reaped=True)
+                reaped += 1
+        return reaped
+
+    def _ttl_reaper_loop(self) -> None:
+        # Check often enough for tests with short TTLs; production TTL is hours.
+        while not self._reaper_stop.wait(timeout=5.0):
+            try:
+                self.reap_expired()
+            except Exception:
+                pass
+
+    def _is_expired(self, session: EpisodeSession) -> bool:
+        ttl = float(self.config.episode_ttl_s)
+        if ttl <= 0:
+            return False
+        return (time.time() - session.created_at) >= ttl
+
+    def _close_locked(self, session: EpisodeSession, *, reaped: bool) -> None:
+        if not session.closed:
+            if session.env is not None:
+                session.env.close()
+            session.closed = True
+            if reaped:
+                get_metrics().inc("ttl_reaped")
 
     def _get_active(self, episode_id: str) -> EpisodeSession:
         with self._lock:

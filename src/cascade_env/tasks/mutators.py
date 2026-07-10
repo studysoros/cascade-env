@@ -183,10 +183,25 @@ def _tpl_auth_debug_flag(workspace: Path, m: MutationSpec) -> str:
 def _tpl_stock_bug(workspace: Path, m: MutationSpec) -> str:
     path = _safe_join(workspace, m.file or "app/api/routes/orders.py")
     text = path.read_text(encoding="utf-8")
-    text = text.replace(
-        "product.stock -= item.qty",
-        "pass  # CASCADE_FAULT: stock not decremented\n        # product.stock -= item.qty",
+    # Shopstack uses `qty` from resolved tuples; older stubs used `item.qty`
+    candidates = (
+        (
+            "product.stock -= qty",
+            "pass  # CASCADE_FAULT: stock not decremented\n            # product.stock -= qty",
+        ),
+        (
+            "product.stock -= item.qty",
+            "pass  # CASCADE_FAULT: stock not decremented\n        # product.stock -= item.qty",
+        ),
     )
+    applied = False
+    for old, new in candidates:
+        if old in text:
+            text = text.replace(old, new, 1)
+            applied = True
+            break
+    if not applied or "CASCADE_FAULT: stock not decremented" not in text:
+        raise MutationError("stock_not_decremented template did not apply")
     path.write_text(text, encoding="utf-8")
     return "template stock_not_decremented"
 
@@ -194,10 +209,26 @@ def _tpl_stock_bug(workspace: Path, m: MutationSpec) -> str:
 def _tpl_idempotency_bug(workspace: Path, m: MutationSpec) -> str:
     path = _safe_join(workspace, m.file or "app/api/routes/orders.py")
     text = path.read_text(encoding="utf-8")
-    text = text.replace(
-        "if existing is not None:\n        return existing",
-        "if False and existing is not None:\n        return existing  # CASCADE_FAULT: idempotency broken",
+    old = (
+        "if existing is not None:\n"
+        "            items = list(s.query(OrderItem).filter(OrderItem.order_id == existing.id).all())\n"
+        "            return _order_dict(existing, items)"
     )
+    new = (
+        "if False and existing is not None:  # CASCADE_FAULT: idempotency broken\n"
+        "            items = list(s.query(OrderItem).filter(OrderItem.order_id == existing.id).all())\n"
+        "            return _order_dict(existing, items)"
+    )
+    if old not in text:
+        # fallback for simplified stubs
+        text = text.replace(
+            "if existing is not None:\n        return existing",
+            "if False and existing is not None:\n        return existing  # CASCADE_FAULT: idempotency broken",
+        )
+    else:
+        text = text.replace(old, new)
+    if "CASCADE_FAULT: idempotency broken" not in text:
+        raise MutationError("broken_idempotency template did not apply")
     path.write_text(text, encoding="utf-8")
     return "template broken_idempotency"
 
